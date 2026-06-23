@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
+from voxels import grids_to_faces
+from preview3d import render_preview
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
@@ -148,6 +150,28 @@ def draw_grid(canvas):
         canvas.create_line(offset_x, y, offset_x + size, y, fill=color)
 
 
+preview_canvas = None
+preview_azimuth = 35
+preview_elevation = 25
+cached_faces = []
+
+
+def rebuild_faces():
+    global cached_faces
+    cached_faces = grids_to_faces(grids["top"], grids["front"], grids["side"])
+    redraw_preview()
+
+
+def redraw_preview():
+    if preview_canvas is None:
+        return
+    render_preview(preview_canvas, cached_faces, preview_azimuth, preview_elevation)
+
+
+def update_preview():
+    rebuild_faces()
+
+
 def mark_dirty():
     global dirty
     dirty = True
@@ -165,6 +189,7 @@ def on_click(event, mode="fill"):
         grid.pop((col, row), None)
     mark_dirty()
     draw_grid(canvas)
+    update_preview()
 
 
 def on_drag(event, mode="fill"):
@@ -178,11 +203,13 @@ def on_drag(event, mode="fill"):
             grid[(col, row)] = selected_color
             mark_dirty()
             draw_grid(canvas)
+            update_preview()
     else:
         if (col, row) in grid:
             grid.pop((col, row))
             mark_dirty()
             draw_grid(canvas)
+            update_preview()
 
 
 def main():
@@ -213,6 +240,31 @@ def main():
 
     preview_3d = tk.Canvas(content, bg="#1a1a1a", highlightthickness=0)
     preview_3d.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+
+    global preview_canvas
+    preview_canvas = preview_3d
+
+    drag_start = [None, None]
+
+    def on_preview_press(event):
+        drag_start[0] = event.x
+        drag_start[1] = event.y
+
+    def on_preview_drag(event):
+        global preview_azimuth, preview_elevation
+        if drag_start[0] is None:
+            return
+        dx = event.x - drag_start[0]
+        dy = event.y - drag_start[1]
+        preview_azimuth -= dx * 0.5
+        preview_elevation = max(-89, min(89, preview_elevation + dy * 0.5))
+        drag_start[0] = event.x
+        drag_start[1] = event.y
+        redraw_preview()
+
+    preview_3d.bind("<Button-1>", on_preview_press)
+    preview_3d.bind("<B1-Motion>", on_preview_drag)
+    preview_3d.bind("<Configure>", lambda e: redraw_preview())
 
     right_panel = tk.Frame(content, bg="#333333")
     right_panel.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=1, pady=1)
@@ -320,6 +372,7 @@ def main():
         dirty = False
         for view in grid_views:
             draw_grid(view)
+        update_preview()
 
     def do_save():
         global dirty
@@ -350,6 +403,7 @@ def main():
             dirty = False
             for view in grid_views:
                 draw_grid(view)
+            update_preview()
 
     new_btn = tk.Button(button_frame, text="New", width=8, command=do_new)
     new_btn.pack(side=tk.LEFT, padx=5)

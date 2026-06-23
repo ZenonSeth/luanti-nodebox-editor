@@ -116,5 +116,11 @@ Texture painting: replace binary filled/empty cells with color/transparent
   - 3D preview shades each voxel face with the pixel color from the corresponding view
   - Export textures as PNG using Pillow (acceptable dependency since we're packaging with PyInstaller)
 
+3D preview optimization: scanline back-to-front rendering
+  - Determine camera octant from view vector component signs
+  - Iterate voxels in axis order matching that octant (e.g. X asc, Y desc, Z asc)
+  - Faces are emitted in guaranteed back-to-front order, no sort needed
+  - O(n) instead of O(n log n), works because all faces are unit-sized
+
 Import existing Lua node_box definitions: parse n/16 values back into filled grid cells
   (trivial inverse of the output operation)
