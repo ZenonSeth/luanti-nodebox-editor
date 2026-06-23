@@ -110,7 +110,8 @@ Future features (low priority)
 
 Texture painting: replace binary filled/empty cells with color/transparent
   - Color = filled, transparent = empty (unifies shape and texture editing, no mode toggle)
-  - Palette picker with solid colors + transparent option (no semi-transparency)
+  - Preset color palette in the right panel with solid colors + transparent option (no semi-transparency)
+  - "+" button at the bottom of the palette to add custom colors via tkinter.colorchooser
   - Each view's colors map to corresponding face pairs (Top->top/bottom, Front->front/back, Side->left/right)
   - 3D preview shades each voxel face with the pixel color from the corresponding view
   - Export textures as PNG using Pillow (acceptable dependency since we're packaging with PyInstaller)

@@ -1,10 +1,85 @@
+import json
+import os
 import tkinter as tk
+from tkinter import filedialog, messagebox
+
+from nbx_format import save_nbx, load_nbx
+
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+
+DEFAULT_SETTINGS = {
+    "zoom": "0.75x",
+}
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            saved = json.load(f)
+        return {**DEFAULT_SETTINGS, **saved}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return dict(DEFAULT_SETTINGS)
+
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=2)
 
 TARGET_RATIO = 16 / 9
 GRID_SIZE = 64
 NODE_START = 16
 NODE_END = 48
-FILL_COLOR = "#5b8fb9"
+PALETTE_STEPS = 8
+PALETTE_CELL_SIZE = 3
+
+BASE_COLORS = [
+    (255, 0, 0),
+    (255, 140, 0),
+    (255, 220, 0),
+    (0, 180, 0),
+    (0, 200, 200),
+    (0, 100, 255),
+    (160, 0, 255),
+]
+GRAY_BASE = (160, 160, 160)
+
+
+def lerp(a, b, t):
+    return int(a + (b - a) * t)
+
+
+def rgb_to_hex(r, g, b):
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def generate_palette_rows(base, steps=PALETTE_STEPS):
+    r, g, b = base
+    tints = []
+    for i in range(steps):
+        t = i / (steps - 1) * 0.9
+        tints.append(rgb_to_hex(lerp(r, 255, t), lerp(g, 255, t), lerp(b, 255, t)))
+    shades = []
+    for i in range(steps):
+        t = i / (steps - 1) * 0.85
+        shades.append(rgb_to_hex(lerp(r, 30, t), lerp(g, 30, t), lerp(b, 30, t)))
+    return tints, shades
+
+
+def build_palette():
+    rows = []
+    for base in BASE_COLORS:
+        tints, shades = generate_palette_rows(base)
+        rows.append(tints)
+        rows.append(shades)
+    grays = []
+    for i in range(PALETTE_STEPS):
+        v = lerp(255, 20, i / (PALETTE_STEPS - 1))
+        grays.append(rgb_to_hex(v, v, v))
+    rows.append(grays)
+    return rows
+
+
+selected_color = "#5b8fb9"
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -12,8 +87,12 @@ ZOOM_LEVELS = {
     "0.5x": (0, 64),
 }
 
-grids = {}
-current_zoom = "0.75x"
+grids = {"top": {}, "front": {}, "side": {}}
+canvas_to_name = {}
+dirty = False
+last_saved_state = None
+settings = load_settings()
+current_zoom = settings.get("zoom", "0.75x")
 
 
 def get_grid_params(canvas):
@@ -54,12 +133,12 @@ def draw_grid(canvas):
     node_y2 = offset_y + min(view_end - view_start, NODE_END - view_start) * cell
     canvas.create_rectangle(node_x1, node_y1, node_x2, node_y2, fill="#323232", outline="")
 
-    grid = grids.get(canvas, set())
-    for col, row in grid:
+    grid = grids[canvas_to_name[canvas]]
+    for (col, row), color in grid.items():
         if view_start <= col < view_end and view_start <= row < view_end:
             x1 = offset_x + (col - view_start) * cell
             y1 = offset_y + (row - view_start) * cell
-            canvas.create_rectangle(x1, y1, x1 + cell, y1 + cell, fill=FILL_COLOR, outline="")
+            canvas.create_rectangle(x1, y1, x1 + cell, y1 + cell, fill=color, outline="")
 
     for i in range(view_start, view_end + 1):
         x = offset_x + (i - view_start) * cell
@@ -69,7 +148,9 @@ def draw_grid(canvas):
         canvas.create_line(offset_x, y, offset_x + size, y, fill=color)
 
 
-drag_mode = {}
+def mark_dirty():
+    global dirty
+    dirty = True
 
 
 def on_click(event, mode="fill"):
@@ -77,11 +158,12 @@ def on_click(event, mode="fill"):
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
-    grid = grids.setdefault(canvas, set())
+    grid = grids[canvas_to_name[canvas]]
     if mode == "fill":
-        grid.add((col, row))
+        grid[(col, row)] = selected_color
     else:
-        grid.discard((col, row))
+        grid.pop((col, row), None)
+    mark_dirty()
     draw_grid(canvas)
 
 
@@ -90,19 +172,21 @@ def on_drag(event, mode="fill"):
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
-    grid = grids.setdefault(canvas, set())
+    grid = grids[canvas_to_name[canvas]]
     if mode == "fill":
-        if (col, row) not in grid:
-            grid.add((col, row))
+        if (col, row) not in grid or grid[(col, row)] != selected_color:
+            grid[(col, row)] = selected_color
+            mark_dirty()
             draw_grid(canvas)
     else:
         if (col, row) in grid:
-            grid.discard((col, row))
+            grid.pop((col, row))
+            mark_dirty()
             draw_grid(canvas)
 
 
 def main():
-    global current_zoom
+    global current_zoom, selected_color
 
     root = tk.Tk()
     root.title("Luanti Node Box Editor")
@@ -133,8 +217,13 @@ def main():
     right_panel = tk.Frame(content, bg="#333333")
     right_panel.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=1, pady=1)
 
+    canvas_to_name[top_view] = "top"
+    canvas_to_name[front_view] = "front"
+    canvas_to_name[side_view] = "side"
+
     grid_views = [top_view, front_view, side_view]
 
+    # Zoom controls
     zoom_label = tk.Label(right_panel, text="Zoom", bg="#333333", fg="#cccccc")
     zoom_label.pack(pady=(10, 5))
 
@@ -144,6 +233,8 @@ def main():
     def set_zoom(level):
         global current_zoom
         current_zoom = level
+        settings["zoom"] = level
+        save_settings(settings)
         for btn in zoom_buttons.values():
             btn.configure(relief=tk.RAISED)
         zoom_buttons[level].configure(relief=tk.SUNKEN)
@@ -158,6 +249,116 @@ def main():
         zoom_buttons[level] = btn
 
     zoom_buttons[current_zoom].configure(relief=tk.SUNKEN)
+
+    # Palette
+    palette_label = tk.Label(right_panel, text="Color", bg="#333333", fg="#cccccc")
+    palette_label.pack(pady=(15, 5))
+
+    color_indicator = tk.Canvas(right_panel, width=30, height=30,
+                                bg=selected_color, highlightthickness=1,
+                                highlightbackground="#666666")
+    color_indicator.pack(pady=(0, 5))
+
+    palette_canvas = tk.Canvas(right_panel, bg="#333333", highlightthickness=0)
+    palette_canvas.pack(padx=5, fill=tk.X)
+
+    palette_rows = build_palette()
+
+    def draw_palette(event=None):
+        palette_canvas.delete("all")
+        w = palette_canvas.winfo_width()
+        if w <= 1:
+            return
+        cell_w = (w * 0.75) / PALETTE_STEPS
+        cell_h = cell_w * 0.5
+        for row_idx, row in enumerate(palette_rows):
+            for col_idx, color in enumerate(row):
+                x1 = col_idx * cell_w
+                y1 = row_idx * cell_h
+                palette_canvas.create_rectangle(
+                    x1, y1, x1 + cell_w, y1 + cell_h,
+                    fill=color, outline="#222222"
+                )
+        total_height = len(palette_rows) * cell_h
+        palette_canvas.configure(height=int(total_height))
+
+    def on_palette_click(event):
+        global selected_color
+        w = palette_canvas.winfo_width()
+        if w <= 1:
+            return
+        cell_w = (w * 0.75) / PALETTE_STEPS
+        cell_h = cell_w * 0.5
+        col = int(event.x / cell_w)
+        row = int(event.y / cell_h)
+        if 0 <= row < len(palette_rows) and 0 <= col < len(palette_rows[row]):
+            selected_color = palette_rows[row][col]
+            color_indicator.configure(bg=selected_color)
+
+    palette_canvas.bind("<Configure>", draw_palette)
+    palette_canvas.bind("<Button-1>", on_palette_click)
+
+    # Save/Load buttons at bottom
+    button_frame = tk.Frame(right_panel, bg="#333333")
+    button_frame.pack(side=tk.BOTTOM, pady=10)
+
+    def check_unsaved():
+        if not dirty:
+            return True
+        return messagebox.askyesno(
+            "Unsaved Changes",
+            "You have unsaved changes. Continue without saving?"
+        )
+
+    def do_new():
+        if not check_unsaved():
+            return
+        global dirty
+        grids["top"] = {}
+        grids["front"] = {}
+        grids["side"] = {}
+        dirty = False
+        for view in grid_views:
+            draw_grid(view)
+
+    def do_save():
+        global dirty
+        path = filedialog.asksaveasfilename(
+            defaultextension=".nbx",
+            filetypes=[("NodeBox files", "*.nbx")],
+        )
+        if path:
+            json_str = save_nbx(grids["top"], grids["front"], grids["side"])
+            with open(path, "w") as f:
+                f.write(json_str)
+            dirty = False
+
+    def do_load():
+        if not check_unsaved():
+            return
+        global dirty
+        path = filedialog.askopenfilename(
+            filetypes=[("NodeBox files", "*.nbx")],
+        )
+        if path:
+            with open(path, "r") as f:
+                json_str = f.read()
+            top, front, side = load_nbx(json_str)
+            grids["top"] = top
+            grids["front"] = front
+            grids["side"] = side
+            dirty = False
+            for view in grid_views:
+                draw_grid(view)
+
+    new_btn = tk.Button(button_frame, text="New", width=8, command=do_new)
+    new_btn.pack(side=tk.LEFT, padx=5)
+
+    save_btn = tk.Button(button_frame, text="Save", width=8, command=do_save)
+    save_btn.pack(side=tk.LEFT, padx=5)
+
+    load_btn = tk.Button(button_frame, text="Load", width=8, command=do_load)
+    load_btn.pack(side=tk.LEFT, padx=5)
 
     def on_resize(event):
         if event.widget is not root:
