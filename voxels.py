@@ -91,6 +91,15 @@ def grids_to_faces(top, front, side):
     return voxels_to_faces(voxels)
 
 
+def bounding_box(voxels):
+    if not voxels:
+        return None
+    xs = [x for x, y, z in voxels]
+    ys = [y for x, y, z in voxels]
+    zs = [z for x, y, z in voxels]
+    return (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
+
+
 def grids_to_cuboids(top, front, side):
     voxels = visual_hull(top, front, side)
     return greedy_mesh(voxels)
