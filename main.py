@@ -150,18 +150,16 @@ def draw_grid(canvas):
         canvas.create_line(offset_x, y, offset_x + size, y, fill=color)
 
     VIEW_LABELS = {
-        "top":   ("Top",   "-X", "+X", "-Z", "+Z"),
-        "front": ("Front", "-X", "+X", "+Y", "-Y"),
-        "side":  ("Side",  "-Z", "+Z", "+Y", "-Y"),
+        "top":   ("-X", "+X", "-Z", "+Z"),
+        "front": ("-X", "+X", "+Y", "-Y"),
+        "side":  ("-Z", "+Z", "+Y", "-Y"),
     }
     name = canvas_to_name.get(canvas)
     if name and name in VIEW_LABELS:
-        title, lbl_left, lbl_right, lbl_top, lbl_bottom = VIEW_LABELS[name]
+        lbl_left, lbl_right, lbl_top, lbl_bottom = VIEW_LABELS[name]
         mid = offset_x + size / 2
         midy = offset_y + size / 2
         margin = 4
-        canvas.create_text(mid, offset_y + margin, text=title,
-                           fill="#999999", font=("TkDefaultFont", 11, "bold"), anchor="n")
         canvas.create_text(offset_x + margin, midy, text=lbl_left,
                            fill="#999999", font=("TkDefaultFont", 9), anchor="w")
         canvas.create_text(offset_x + size - margin, midy, text=lbl_right,
@@ -243,8 +241,11 @@ def main():
     global current_zoom, selected_color
 
     root = tk.Tk()
-    root.title("Luanti Node Box Editor")
-    root.geometry("1280x720")
+    root.title("Luanti VHR Node Box Editor")
+    geom = settings.get("geometry", "1280x720")
+    root.geometry(geom)
+    if settings.get("maximized", False):
+        root.state("zoomed")
     root.configure(bg="#000000")
 
     content = tk.Frame(root, bg="#000000")
@@ -256,17 +257,40 @@ def main():
     content.rowconfigure(0, weight=1, uniform="row")
     content.rowconfigure(1, weight=1, uniform="row")
 
-    top_view = tk.Canvas(content, bg="#2a2a2a", highlightthickness=0)
-    top_view.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-
-    front_view = tk.Canvas(content, bg="#2a2a2a", highlightthickness=0)
-    front_view.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-
-    side_view = tk.Canvas(content, bg="#2a2a2a", highlightthickness=0)
-    side_view.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
+    top_frame = tk.Frame(content, bg="#2a2a2a")
+    top_frame.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+    tk.Label(top_frame, text="Top", bg="#2a2a2a", fg="#999999",
+             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
+    top_view = tk.Canvas(top_frame, bg="#2a2a2a", highlightthickness=0)
+    top_view.place(relx=0.5, rely=0.5, anchor="center")
 
     preview_3d = tk.Canvas(content, bg="#1a1a1a", highlightthickness=0)
-    preview_3d.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+    preview_3d.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+
+    front_frame = tk.Frame(content, bg="#2a2a2a")
+    front_frame.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
+    tk.Label(front_frame, text="Front", bg="#2a2a2a", fg="#999999",
+             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
+    front_view = tk.Canvas(front_frame, bg="#2a2a2a", highlightthickness=0)
+    front_view.place(relx=0.5, rely=0.5, anchor="center")
+
+    side_frame = tk.Frame(content, bg="#2a2a2a")
+    side_frame.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+    tk.Label(side_frame, text="Side", bg="#2a2a2a", fg="#999999",
+             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
+    side_view = tk.Canvas(side_frame, bg="#2a2a2a", highlightthickness=0)
+    side_view.place(relx=0.5, rely=0.5, anchor="center")
+
+    def on_view_frame_resize(event):
+        frame = event.widget
+        size = min(event.width, event.height)
+        for child in frame.winfo_children():
+            if isinstance(child, tk.Canvas):
+                child.place_configure(width=size, height=size)
+
+    top_frame.bind("<Configure>", on_view_frame_resize)
+    front_frame.bind("<Configure>", on_view_frame_resize)
+    side_frame.bind("<Configure>", on_view_frame_resize)
 
     global preview_canvas
     preview_canvas = preview_3d
@@ -566,8 +590,33 @@ def main():
     export_frame = tk.Frame(right_panel, bg="#333333")
     export_frame.pack(side=tk.BOTTOM, pady=(0, 10))
 
+    def do_about():
+        win = tk.Toplevel(root)
+        win.title("About")
+        w, h = 320, 160
+        sx = root.winfo_x() + (root.winfo_width() - w) // 2
+        sy = root.winfo_y() + (root.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{sx}+{sy}")
+        win.configure(bg="#2a2a2a")
+        win.transient(root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(win, text="Luanti VHR Node Box Editor", bg="#2a2a2a", fg="#cccccc",
+                 font=("TkDefaultFont", 12, "bold")).pack(pady=(20, 4))
+        tk.Label(win, text="Version 0.5.0",
+                 bg="#2a2a2a", fg="#999999", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
+        tk.Label(win, text="Visual Hull Reconstruction Node Box Editor",
+                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 8))
+        tk.Label(win, text="by Zenon Seth", bg="#2a2a2a", fg="#ccff00",
+                 font=("TkDefaultFont", 10)).pack(pady=(0, 12))
+        tk.Button(win, text="Close", width=8, command=win.destroy).pack()
+
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
-    export_btn.pack()
+    export_btn.pack(side=tk.LEFT, padx=5)
+
+    about_btn = tk.Button(export_frame, text="About", width=8, command=do_about)
+    about_btn.pack(side=tk.LEFT, padx=5)
 
     def on_resize(event):
         if event.widget is not root:
@@ -593,6 +642,15 @@ def main():
         view.bind("<Button-3>", lambda e: on_click(e, "erase"))
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
 
+    def on_close():
+        maximized = root.state() == "zoomed"
+        settings["maximized"] = maximized
+        if not maximized:
+            settings["geometry"] = root.geometry()
+        save_settings(settings)
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
     root.mainloop()
 
 
