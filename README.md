@@ -44,7 +44,7 @@ Pre-built standalone executables (no Python required) are available on the
 Requires Python 3.10+ and pypng (https://pypi.org/project/pypng/):
 
     pip install pypng
-    python main.py
+    python src/main.py
 
 ### Packaging with PyInstaller
 

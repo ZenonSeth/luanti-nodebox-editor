@@ -9,7 +9,7 @@ from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 import undo
 
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
 
 DEFAULT_SETTINGS = {
     "zoom": "0.75x",
