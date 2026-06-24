@@ -2,8 +2,8 @@
 
 - [ ] 3D preview: use per-cell colors from grids instead of flat BASE_COLOR
       (each face's color comes from the corresponding view's grid cell)
-- [ ] Lua output generation: convert cuboids/AABB to n/16 notation
-- [ ] Export UI: button/panel for exporting Lua snippet (greedy mesh vs single AABB option)
+- [x] Lua output generation: convert cuboids/AABB to n/16 notation
+- [x] Export UI: button/panel for exporting Lua snippet (greedy mesh vs single AABB option)
 - [ ] Labels on the 3 grid views (Top, Front, Side)
 
 ## Polish

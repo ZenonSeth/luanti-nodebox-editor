@@ -100,6 +100,133 @@ def bounding_box(voxels):
     return (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
 
 
+def _greedy_2d(cells):
+    remaining = set(cells)
+    rects = []
+    while remaining:
+        a, b = min(remaining)
+        a2 = a
+        while (a2 + 1, b) in remaining:
+            a2 += 1
+        b2 = b
+        expand = True
+        while expand:
+            for ai in range(a, a2 + 1):
+                if (ai, b2 + 1) not in remaining:
+                    expand = False
+                    break
+            if expand:
+                b2 += 1
+        for ai in range(a, a2 + 1):
+            for bi in range(b, b2 + 1):
+                remaining.discard((ai, bi))
+        rects.append((a, b, a2, b2))
+    return rects
+
+
+def _merge_slices(slices_by_coord):
+    cuboids = []
+    active = {}
+    for coord in sorted(slices_by_coord):
+        rects = set(slices_by_coord[coord])
+        next_active = {}
+        for rect in rects:
+            if rect in active:
+                next_active[rect] = active[rect]
+            else:
+                next_active[rect] = coord
+        for rect, start in active.items():
+            if rect not in rects:
+                cuboids.append((rect, start, coord - 1))
+        active = next_active
+    for rect, start in active.items():
+        cuboids.append((rect, start, max(slices_by_coord)))
+    return cuboids
+
+
+def sweep_mesh_x(voxels):
+    slices = {}
+    for x, y, z in voxels:
+        slices.setdefault(x, set()).add((y, z))
+    slices_rects = {}
+    for x, cells in slices.items():
+        slices_rects[x] = tuple(_greedy_2d(cells))
+    merged = _merge_slices(slices_rects)
+    cuboids = []
+    for (y1, z1, y2, z2), x1, x2 in merged:
+        cuboids.append((x1, y1, z1, x2, y2, z2))
+    return cuboids
+
+
+def sweep_mesh_y(voxels):
+    slices = {}
+    for x, y, z in voxels:
+        slices.setdefault(y, set()).add((x, z))
+    slices_rects = {}
+    for y, cells in slices.items():
+        slices_rects[y] = tuple(_greedy_2d(cells))
+    merged = _merge_slices(slices_rects)
+    cuboids = []
+    for (x1, z1, x2, z2), y1, y2 in merged:
+        cuboids.append((x1, y1, z1, x2, y2, z2))
+    return cuboids
+
+
+def sweep_mesh_z(voxels):
+    slices = {}
+    for x, y, z in voxels:
+        slices.setdefault(z, set()).add((x, y))
+    slices_rects = {}
+    for z, cells in slices.items():
+        slices_rects[z] = tuple(_greedy_2d(cells))
+    merged = _merge_slices(slices_rects)
+    cuboids = []
+    for (x1, y1, x2, y2), z1, z2 in merged:
+        cuboids.append((x1, y1, z1, x2, y2, z2))
+    return cuboids
+
+
+def best_mesh(voxels):
+    named = [
+        ("greedy", greedy_mesh(voxels)),
+        ("sweep_x", sweep_mesh_x(voxels)),
+        ("sweep_y", sweep_mesh_y(voxels)),
+        ("sweep_z", sweep_mesh_z(voxels)),
+    ]
+    best_name, best_cuboids = min(named, key=lambda x: len(x[1]))
+    return best_cuboids, best_name
+
+
 def grids_to_cuboids(top, front, side):
     voxels = visual_hull(top, front, side)
-    return greedy_mesh(voxels)
+    return best_mesh(voxels)
+
+
+def cuboid_to_lua_entry(x1, y1, z1, x2, y2, z2):
+    lx1 = x1 - 32
+    lx2 = x2 + 1 - 32
+    ly1 = 32 - (y2 + 1)
+    ly2 = 32 - y1
+    lz1 = z1 - 32
+    lz2 = z2 + 1 - 32
+
+    def fmt(n):
+        if n == 0:
+            return "0"
+        return f"{n}/16"
+
+    return f"{{{fmt(lx1)}, {fmt(ly1)}, {fmt(lz1)}, {fmt(lx2)}, {fmt(ly2)}, {fmt(lz2)}}}"
+
+
+def grids_to_lua(top, front, side):
+    cuboids, method = grids_to_cuboids(top, front, side)
+    if not cuboids:
+        return "-- No voxels to export", None, 0
+    entries = [cuboid_to_lua_entry(*c) for c in cuboids]
+    if len(entries) == 1:
+        fixed = entries[0]
+    else:
+        lines = ",\n        ".join(entries)
+        fixed = f"{{\n        {lines},\n    }}"
+    lua = f"node_box = {{\n    type = \"fixed\",\n    fixed = {fixed},\n}}"
+    return lua, method, len(cuboids)

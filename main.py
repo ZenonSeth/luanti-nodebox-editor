@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces
+from voxels import grids_to_faces, grids_to_lua
 from preview3d import render_preview
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -427,6 +427,43 @@ def main():
                 draw_grid(view)
             update_preview()
 
+    def do_export():
+        lua_code, method, count = grids_to_lua(grids["top"], grids["front"], grids["side"])
+        win = tk.Toplevel(root)
+        win.title("Export Lua")
+        win.geometry("500x340")
+        win.configure(bg="#2a2a2a")
+        win.transient(root)
+        win.grab_set()
+
+        btn_bar = tk.Frame(win, bg="#2a2a2a", height=40)
+        btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 10))
+        btn_bar.pack_propagate(False)
+
+        if method:
+            info = f"{count} cuboid{'s' if count != 1 else ''} (method: {method})"
+            info_label = tk.Label(win, text=info, bg="#2a2a2a", fg="#888888",
+                                  font=("TkDefaultFont", 9))
+            info_label.pack(side=tk.BOTTOM, pady=(0, 2))
+
+        text = tk.Text(win, bg="#1a1a1a", fg="#cccccc", insertbackground="#cccccc",
+                       font=("Consolas", 10), wrap=tk.NONE, padx=8, pady=8)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 5))
+        text.insert("1.0", lua_code)
+        text.configure(state=tk.DISABLED)
+
+        def copy_to_clipboard():
+            root.clipboard_clear()
+            root.clipboard_append(lua_code)
+            copy_btn.configure(text="Copied!")
+            win.after(1500, lambda: copy_btn.configure(text="Copy"))
+
+        copy_btn = tk.Button(btn_bar, text="Copy", width=10, command=copy_to_clipboard)
+        copy_btn.pack(side=tk.LEFT, padx=5)
+
+        close_btn = tk.Button(btn_bar, text="Close", width=10, command=win.destroy)
+        close_btn.pack(side=tk.LEFT, padx=5)
+
     new_btn = tk.Button(button_frame, text="New", width=8, command=do_new)
     new_btn.pack(side=tk.LEFT, padx=5)
 
@@ -435,6 +472,12 @@ def main():
 
     load_btn = tk.Button(button_frame, text="Load", width=8, command=do_load)
     load_btn.pack(side=tk.LEFT, padx=5)
+
+    export_frame = tk.Frame(right_panel, bg="#333333")
+    export_frame.pack(side=tk.BOTTOM, pady=(0, 10))
+
+    export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
+    export_btn.pack()
 
     def on_resize(event):
         if event.widget is not root:
