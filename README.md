@@ -2,6 +2,8 @@
 
 A visual editor for creating [Luanti](https://www.luanti.org/) node box definitions by painting on three orthogonal 2D grid views. The intersection of the three projections (a visual hull) defines a 3D voxel shape, which is automatically decomposed into minimal axis-aligned cuboids for Lua output.
 
+![Nodebox Editor screenshot](https://github.com/user-attachments/assets/9c406166-d437-482f-9575-410eb8bdda37)
+
 ## How it works
 
 You paint filled cells on three views -- Top (XZ), Front (XY), and Side (ZY). A voxel at position (x, y, z) is considered solid only when it is filled in all three views. The resulting shape updates live in the 3D preview pane and as ready-to-use Lua code that you can copy straight into your node definition.
