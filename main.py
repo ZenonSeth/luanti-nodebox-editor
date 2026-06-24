@@ -82,6 +82,7 @@ def build_palette():
 
 
 selected_color = "#0064ff"
+color_indicator = None
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -174,17 +175,23 @@ preview_canvas = None
 preview_azimuth = 35
 preview_elevation = 25
 cached_faces = []
-preview_all_layers = False
 _layers = None
 _active_layer_idx = 0
 
 
+def _visible_layers():
+    if not _layers:
+        return []
+    return [l for l in _layers if l.get("visible", True)]
+
+
 def rebuild_faces():
     global cached_faces
-    if preview_all_layers and _layers:
-        cached_faces = layers_to_colored_faces(_layers)
+    vis = _visible_layers()
+    if vis:
+        cached_faces = layers_to_colored_faces(vis)
     else:
-        cached_faces = grids_to_colored_faces(grids["top"], grids["front"], grids["side"])
+        cached_faces = []
     redraw_preview()
 
 
@@ -209,6 +216,20 @@ def _resolve_fill_color(view_name, col, row):
         if (col, row) in top_layer_grid:
             return top_layer_grid[(col, row)]
     return selected_color
+
+
+def on_pick_color(event):
+    canvas = event.widget
+    col, row = pixel_to_cell(canvas, event.x, event.y)
+    if col is None:
+        return
+    view_name = canvas_to_name[canvas]
+    grid = grids[view_name]
+    color = grid.get((col, row))
+    if color:
+        global selected_color
+        selected_color = color
+        color_indicator.configure(bg=selected_color)
 
 
 def on_click(event, mode="fill"):
@@ -369,6 +390,7 @@ def main():
     palette_label = tk.Label(right_panel, text="Color", bg="#333333", fg="#cccccc")
     palette_label.pack(pady=(15, 5))
 
+    global color_indicator
     color_indicator = tk.Canvas(right_panel, width=30, height=30,
                                 bg=selected_color, highlightthickness=1,
                                 highlightbackground="#666666")
@@ -463,34 +485,48 @@ def main():
     layers_frame = tk.Frame(right_panel, bg="#333333")
     layers_frame.pack(padx=5, fill=tk.X)
 
-    layer_list_frame = tk.Frame(layers_frame, bg="#333333", height=160)
+    layer_list_frame = tk.Frame(layers_frame, bg="#1a1a1a", height=160,
+                               relief=tk.SUNKEN, borderwidth=1)
     layer_list_frame.pack(fill=tk.X)
     layer_list_frame.pack_propagate(False)
 
-    layer_scrollbar = tk.Scrollbar(layer_list_frame, orient=tk.VERTICAL)
-    layer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-    layer_listbox = tk.Listbox(layer_list_frame, bg="#1a1a1a", fg="#cccccc",
-                               selectbackground="#4a6a8a", selectforeground="#ffffff",
-                               highlightthickness=0, borderwidth=1,
-                               relief=tk.SUNKEN, font=("TkDefaultFont", 9),
-                               yscrollcommand=layer_scrollbar.set)
-    layer_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    layer_scrollbar.configure(command=layer_listbox.yview)
+    layer_inner = tk.Frame(layer_list_frame, bg="#1a1a1a")
+    layer_inner.pack(fill=tk.BOTH, expand=True)
 
     layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
     layer_btn_frame.pack(pady=(5, 0))
 
     global _layers, _active_layer_idx
-    layers = [{"name": "Top Layer", "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
+    layers = [{"name": "Top Layer", "visible": True,
+               "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
     _layers = layers
     _active_layer_idx = 0
+    layer_widgets = []
 
     def refresh_layer_list():
-        layer_listbox.delete(0, tk.END)
-        for layer in layers:
-            layer_listbox.insert(tk.END, layer["name"])
-        layer_listbox.selection_set(_active_layer_idx)
+        for w in layer_widgets:
+            w.destroy()
+        layer_widgets.clear()
+        for i, layer in enumerate(layers):
+            row = tk.Frame(layer_inner, bg="#4a6a8a" if i == _active_layer_idx else "#1a1a1a")
+            row.pack(fill=tk.X)
+            layer_widgets.append(row)
+
+            var = tk.BooleanVar(value=layer.get("visible", True))
+            cb = tk.Checkbutton(row, variable=var, bg=row["bg"],
+                                activebackground=row["bg"],
+                                command=lambda idx=i, v=var: toggle_visibility(idx, v))
+            cb.pack(side=tk.LEFT)
+
+            lbl = tk.Label(row, text=layer["name"], bg=row["bg"], fg="#ffffff",
+                           font=("TkDefaultFont", 9), anchor="w")
+            lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=i: select_layer(idx))
+
+    def toggle_visibility(idx, var):
+        layers[idx]["visible"] = var.get()
+        mark_dirty()
+        update_preview()
 
     def select_layer(idx):
         global _active_layer_idx
@@ -505,16 +541,9 @@ def main():
             draw_grid(view)
         update_preview()
 
-    def on_layer_select(event):
-        sel = layer_listbox.curselection()
-        if sel:
-            select_layer(sel[0])
-
-    layer_listbox.bind("<<ListboxSelect>>", on_layer_select)
-
     def do_new_layer():
         idx = len(layers) + 1
-        layers.append({"name": f"Layer {idx}", "top": {}, "front": {}, "side": {}})
+        layers.append({"name": f"Layer {idx}", "visible": True, "top": {}, "front": {}, "side": {}})
         select_layer(len(layers) - 1)
         mark_dirty()
 
@@ -522,6 +551,7 @@ def main():
         src = layers[_active_layer_idx]
         layers.append({
             "name": f"{src['name']} copy",
+            "visible": True,
             "top": dict(src["top"]),
             "front": dict(src["front"]),
             "side": dict(src["side"]),
@@ -547,15 +577,17 @@ def main():
     del_layer_btn = tk.Button(layer_btn_frame, text="Del", width=5, command=do_del_layer)
     del_layer_btn.pack(side=tk.LEFT, padx=2)
 
-    def toggle_preview_all():
-        global preview_all_layers
-        preview_all_layers = not preview_all_layers
-        preview_all_btn.configure(relief=tk.SUNKEN if preview_all_layers else tk.RAISED)
-        update_preview()
+    def do_rename_layer():
+        from tkinter import simpledialog
+        current_name = layers[_active_layer_idx]["name"]
+        new_name = simpledialog.askstring("Rename Layer", "New name:", initialvalue=current_name, parent=root)
+        if new_name and new_name.strip():
+            layers[_active_layer_idx]["name"] = new_name.strip()
+            refresh_layer_list()
+            mark_dirty()
 
-    preview_all_btn = tk.Button(layers_frame, text="Show All", width=7,
-                                command=toggle_preview_all, relief=tk.RAISED)
-    preview_all_btn.pack(side=tk.BOTTOM, pady=(5, 0))
+    rename_layer_btn = tk.Button(layer_btn_frame, text="Rename", width=5, command=do_rename_layer)
+    rename_layer_btn.pack(side=tk.LEFT, padx=2)
 
     refresh_layer_list()
 
@@ -610,7 +642,7 @@ def main():
             dirty = False
 
     def do_export():
-        lua_code, method, count = grids_to_lua_layers(layers)
+        lua_code, method, count = grids_to_lua_layers(_visible_layers())
         win = tk.Toplevel(root)
         win.title("Export Lua")
         win.geometry("500x340")
@@ -683,12 +715,13 @@ def main():
             "Controls:\n"
             "  Left-click / drag    Draw with selected color\n"
             "  Right-click / drag   Erase\n"
+            "  Alt + Left-click     Pick color from cell\n"
             "\n"
             "Layers:\n"
-            "  The Top Layer defines shape and color.\n"
-            "  Additional layers also have shape and color,\n"
-            "  but where a pixel overlaps the Top Layer, the\n"
-            "  Top Layer's color is used instead."
+            "  Each layer has a visibility checkbox.\n"
+            "  Only visible layers are shown in the preview\n"
+            "  and included in export. The top layer's color\n"
+            "  takes priority where layers overlap."
         )
         tk.Label(win, text=help_text, bg="#2a2a2a", fg="#cccccc",
                  font=("TkDefaultFont", 9), justify=tk.LEFT, anchor="w").pack(
@@ -725,6 +758,7 @@ def main():
         view.bind("<B1-Motion>", lambda e: on_drag(e, "fill"))
         view.bind("<Button-3>", lambda e: on_click(e, "erase"))
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
+        view.bind("<Alt-Button-1>", on_pick_color)
 
     def on_close():
         if dirty:

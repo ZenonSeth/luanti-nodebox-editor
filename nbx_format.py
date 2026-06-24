@@ -74,12 +74,15 @@ def save_nbx(layers):
 
         encoded_layers = []
         for layer in layers:
-            encoded_layers.append({
+            entry = {
                 "name": layer["name"],
                 "top": _encode_grid(layer["top"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
                 "front": _encode_grid(layer["front"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
                 "side": _encode_grid(layer["side"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
-            })
+            }
+            if not layer.get("visible", True):
+                entry["visible"] = False
+            encoded_layers.append(entry)
 
         data = {
             "version": 1,
@@ -90,12 +93,15 @@ def save_nbx(layers):
     else:
         encoded_layers = []
         for layer in layers:
-            encoded_layers.append({
+            entry = {
                 "name": layer["name"],
                 "top": _encode_grid(layer["top"], _encode_row_inline),
                 "front": _encode_grid(layer["front"], _encode_row_inline),
                 "side": _encode_grid(layer["side"], _encode_row_inline),
-            })
+            }
+            if not layer.get("visible", True):
+                entry["visible"] = False
+            encoded_layers.append(entry)
 
         data = {
             "version": 1,
@@ -171,6 +177,7 @@ def load_nbx(json_str):
         for layer_data in data["layers"]:
             layers.append({
                 "name": layer_data.get("name", f"Layer {len(layers) + 1}"),
+                "visible": layer_data.get("visible", True),
                 "top": _decode_grid(layer_data["top"], decode_fn),
                 "front": _decode_grid(layer_data["front"], decode_fn),
                 "side": _decode_grid(layer_data["side"], decode_fn),
