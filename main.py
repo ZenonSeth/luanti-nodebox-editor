@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox
 from nbx_format import save_nbx, load_nbx
 from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces
 from preview3d import render_preview
+from texture_png import layers_to_png, NODE_START, NODE_END
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
@@ -641,14 +642,73 @@ def main():
             select_layer(0)
             dirty = False
 
+    def _composite_view(view):
+        composite = {}
+        for layer in reversed(_visible_layers()):
+            composite.update(layer[view])
+        return composite
+
+    PREVIEW_SIZE = 128
+    PREVIEW_SCALE = PREVIEW_SIZE // (NODE_END - NODE_START)
+
+    TEX_CELLS = NODE_END - NODE_START
+
+    def _draw_texture_preview(canvas, grid):
+        canvas.delete("all")
+        ox = (PREVIEW_SIZE - TEX_CELLS * PREVIEW_SCALE) // 2
+        oy = (PREVIEW_SIZE - TEX_CELLS * PREVIEW_SCALE) // 2
+        for (col, row), color in grid.items():
+            if not (NODE_START <= col < NODE_END and NODE_START <= row < NODE_END):
+                continue
+            px = ox + (col - NODE_START) * PREVIEW_SCALE
+            py = oy + (row - NODE_START) * PREVIEW_SCALE
+            canvas.create_rectangle(
+                px, py, px + PREVIEW_SCALE, py + PREVIEW_SCALE,
+                fill=color, outline=""
+            )
+        tex_sz = TEX_CELLS * PREVIEW_SCALE
+        canvas.create_rectangle(ox, oy, ox + tex_sz, oy + tex_sz,
+                                outline="#555555", width=1)
+
     def do_export():
         lua_code, method, count = grids_to_lua_layers(_visible_layers())
         win = tk.Toplevel(root)
-        win.title("Export Lua")
-        win.geometry("500x340")
+        win.title("Export")
+        ew, eh = 540, 780
+        sx = root.winfo_x() + (root.winfo_width() - ew) // 2
+        sy = root.winfo_y() + (root.winfo_height() - eh) // 2
+        win.geometry(f"{ew}x{eh}+{sx}+{sy}")
         win.configure(bg="#2a2a2a")
         win.transient(root)
         win.grab_set()
+
+        tex_frame = tk.Frame(win, bg="#2a2a2a")
+        tex_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        def do_export_png(view_name):
+            path = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("PNG files", "*.png")],
+                initialfile=f"{view_name}.png",
+                parent=win,
+            )
+            if path:
+                layers_to_png(_visible_layers(), view_name, path)
+
+        tex_previews = {}
+        for view_name in ("top", "front", "side"):
+            col_frame = tk.Frame(tex_frame, bg="#2a2a2a")
+            col_frame.pack(side=tk.LEFT, padx=5)
+            tk.Label(col_frame, text=view_name.capitalize(), bg="#2a2a2a",
+                     fg="#999999", font=("TkDefaultFont", 9)).pack()
+            c = tk.Canvas(col_frame, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
+                          bg="#1a1a1a", highlightthickness=1,
+                          highlightbackground="#444444")
+            c.pack()
+            tex_previews[view_name] = c
+            _draw_texture_preview(c, _composite_view(view_name))
+            tk.Button(col_frame, text="Export PNG", width=12,
+                      command=lambda v=view_name: do_export_png(v)).pack(pady=(4, 0))
 
         btn_bar = tk.Frame(win, bg="#2a2a2a", height=40)
         btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 10))
@@ -660,20 +720,73 @@ def main():
                                   font=("TkDefaultFont", 9))
             info_label.pack(side=tk.BOTTOM, pady=(0, 2))
 
-        text = tk.Text(win, bg="#1a1a1a", fg="#cccccc", insertbackground="#cccccc",
-                       font=("Consolas", 10), wrap=tk.NONE, padx=8, pady=8)
-        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 5))
+        TILES_DEF = (
+            'tiles = {\n'
+            '    "TOP_TEXTURE_NAME.png",\n'
+            '    "TOP_TEXTURE_NAME.png",\n'
+            '    "SIDE_TEXTURE_NAME.png",\n'
+            '    "SIDE_TEXTURE_NAME.png",\n'
+            '    "FRONT_TEXTURE_NAME.png",\n'
+            '    "FRONT_TEXTURE_NAME.png",\n'
+            '},\n'
+        )
+
+        include_tiles = tk.BooleanVar(value=False)
+
+        def refresh_code():
+            code = lua_code
+            if include_tiles.get():
+                code = TILES_DEF + code
+            text.configure(state=tk.NORMAL)
+            text.delete("1.0", tk.END)
+            text.insert("1.0", code)
+            text.configure(state=tk.DISABLED)
+
+        tiles_cb = tk.Checkbutton(win, text="Include tiles definition",
+                                  variable=include_tiles, bg="#2a2a2a",
+                                  fg="#cccccc", selectcolor="#1a1a1a",
+                                  activebackground="#2a2a2a",
+                                  activeforeground="#cccccc",
+                                  command=refresh_code)
+        tiles_cb.pack(anchor="w", padx=14, pady=(5, 0))
+
+        text_frame = tk.Frame(win, bg="#2a2a2a")
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 5))
+        text_scroll = tk.Scrollbar(text_frame)
+        text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        text = tk.Text(text_frame, bg="#1a1a1a", fg="#cccccc", insertbackground="#cccccc",
+                       font=("Consolas", 10), wrap=tk.NONE, padx=8, pady=8,
+                       yscrollcommand=text_scroll.set)
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_scroll.config(command=text.yview)
         text.insert("1.0", lua_code)
         text.configure(state=tk.DISABLED)
 
+        def get_displayed_code():
+            return text.get("1.0", tk.END).rstrip("\n")
+
         def copy_to_clipboard():
+            code = get_displayed_code()
             root.clipboard_clear()
-            root.clipboard_append(lua_code)
+            root.clipboard_append(code)
             copy_btn.configure(text="Copied!")
             win.after(1500, lambda: copy_btn.configure(text="Copy"))
 
         copy_btn = tk.Button(btn_bar, text="Copy", width=10, command=copy_to_clipboard)
         copy_btn.pack(side=tk.LEFT, padx=5)
+
+        def save_lua():
+            path = filedialog.asksaveasfilename(
+                defaultextension=".lua",
+                filetypes=[("Lua files", "*.lua")],
+                parent=win,
+            )
+            if path:
+                with open(path, "w") as f:
+                    f.write(get_displayed_code())
+
+        save_lua_btn = tk.Button(btn_bar, text="Save", width=10, command=save_lua)
+        save_lua_btn.pack(side=tk.LEFT, padx=5)
 
         close_btn = tk.Button(btn_bar, text="Close", width=10, command=win.destroy)
         close_btn.pack(side=tk.LEFT, padx=5)
