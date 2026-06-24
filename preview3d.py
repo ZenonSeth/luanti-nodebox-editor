@@ -53,7 +53,7 @@ def _project(x, y, z, cx, cy, cz, cos_az, sin_az, cos_el, sin_el, scale, screen_
     ry = cos_el * dy - sin_el * rz
     depth = sin_el * dy + cos_el * rz
 
-    persp = 200 / (200 + depth)
+    persp = 120 / (120 + depth)
     sx = screen_cx + rx * scale * persp
     sy = screen_cy + ry * scale * persp
 

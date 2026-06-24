@@ -149,6 +149,28 @@ def draw_grid(canvas):
         canvas.create_line(x, offset_y, x, offset_y + size, fill=color)
         canvas.create_line(offset_x, y, offset_x + size, y, fill=color)
 
+    VIEW_LABELS = {
+        "top":   ("Top",   "-X", "+X", "-Z", "+Z"),
+        "front": ("Front", "-X", "+X", "+Y", "-Y"),
+        "side":  ("Side",  "-Z", "+Z", "+Y", "-Y"),
+    }
+    name = canvas_to_name.get(canvas)
+    if name and name in VIEW_LABELS:
+        title, lbl_left, lbl_right, lbl_top, lbl_bottom = VIEW_LABELS[name]
+        mid = offset_x + size / 2
+        midy = offset_y + size / 2
+        margin = 4
+        canvas.create_text(mid, offset_y + margin, text=title,
+                           fill="#999999", font=("TkDefaultFont", 11, "bold"), anchor="n")
+        canvas.create_text(offset_x + margin, midy, text=lbl_left,
+                           fill="#999999", font=("TkDefaultFont", 9), anchor="w")
+        canvas.create_text(offset_x + size - margin, midy, text=lbl_right,
+                           fill="#999999", font=("TkDefaultFont", 9), anchor="e")
+        canvas.create_text(mid, offset_y + margin + 14, text=lbl_top,
+                           fill="#999999", font=("TkDefaultFont", 9), anchor="n")
+        canvas.create_text(mid, offset_y + size - margin, text=lbl_bottom,
+                           fill="#999999", font=("TkDefaultFont", 9), anchor="s")
+
 
 preview_canvas = None
 preview_azimuth = 35
