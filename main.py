@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces
 from preview3d import render_preview
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -182,9 +182,9 @@ _active_layer_idx = 0
 def rebuild_faces():
     global cached_faces
     if preview_all_layers and _layers:
-        cached_faces = layers_to_faces(_layers)
+        cached_faces = layers_to_colored_faces(_layers)
     else:
-        cached_faces = grids_to_faces(grids["top"], grids["front"], grids["side"])
+        cached_faces = grids_to_colored_faces(grids["top"], grids["front"], grids["side"])
     redraw_preview()
 
 

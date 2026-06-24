@@ -110,10 +110,16 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
 
     # Backface cull and project
     visible = []
-    r, g, b = BASE_COLOR
+    dr, dg, db = BASE_COLOR
     vx, vy, vz = view_vec
 
-    for fx, fy, fz, name in faces:
+    for face in faces:
+        if len(face) == 5:
+            fx, fy, fz, name, color = face
+        else:
+            fx, fy, fz, name = face
+            color = None
+
         nx, ny, nz = FACE_NORMALS[name]
         dot = nx * vx + ny * vy + nz * vz
         if dot >= 0:
@@ -124,7 +130,13 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
         center_depth = sum(p[2] for p in proj_verts) / 4
 
         shade = FACE_SHADING[name]
-        fill = _shade_color(r, g, b, shade)
+        if color:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            fill = _shade_color(r, g, b, shade)
+        else:
+            fill = _shade_color(dr, dg, db, shade)
 
         visible.append((center_depth, proj_verts, fill))
 

@@ -98,6 +98,48 @@ def layers_to_faces(layers):
     return voxels_to_faces(all_voxels)
 
 
+FACE_VIEW = {
+    "top": "top", "bottom": "top",
+    "front": "front", "back": "front",
+    "right": "side", "left": "side",
+}
+
+
+def _voxels_to_colored_faces(voxel_set, color_maps):
+    top, front, side = color_maps
+    faces = []
+    for x, y, z in voxel_set:
+        for name, (dx, dy, dz) in ADJACENT.items():
+            if (x + dx, y + dy, z + dz) not in voxel_set:
+                view = FACE_VIEW[name]
+                if view == "top":
+                    color = top.get((x, z))
+                elif view == "front":
+                    color = front.get((x, y))
+                else:
+                    color = side.get((z, y))
+                faces.append((x, y, z, name, color))
+    return faces
+
+
+def grids_to_colored_faces(top, front, side):
+    voxels = visual_hull(top, front, side)
+    return _voxels_to_colored_faces(voxels, (top, front, side))
+
+
+def layers_to_colored_faces(layers):
+    all_voxels = set()
+    merged_top = {}
+    merged_front = {}
+    merged_side = {}
+    for layer in reversed(layers):
+        all_voxels |= visual_hull(layer["top"], layer["front"], layer["side"])
+        merged_top.update(layer["top"])
+        merged_front.update(layer["front"])
+        merged_side.update(layer["side"])
+    return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side))
+
+
 def bounding_box(voxels):
     if not voxels:
         return None
