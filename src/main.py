@@ -12,7 +12,7 @@ import undo
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
 
 DEFAULT_SETTINGS = {
-    "zoom": "0.75x",
+    "zoom": "1x",
 }
 
 
