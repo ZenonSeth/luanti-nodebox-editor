@@ -7,6 +7,7 @@ from nbx_format import save_nbx, load_nbx
 from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
+import undo
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
@@ -84,6 +85,8 @@ def build_palette():
 
 selected_color = "#0064ff"
 color_indicator = None
+current_tool = "pencil"
+TOOL_CURSORS = {"pencil": "pencil", "fill": "spraycan"}
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -95,6 +98,9 @@ grids = {"top": {}, "front": {}, "side": {}}
 canvas_to_name = {}
 dirty = False
 last_saved_state = None
+
+def undo_push():
+    undo.push(_layers, _active_layer_idx)
 settings = load_settings()
 current_zoom = settings.get("zoom", "0.75x")
 
@@ -235,30 +241,68 @@ def on_pick_color(event):
         color_indicator.configure(bg=selected_color)
 
 
-def on_click(event, mode="fill"):
+def flood_fill(grid, view_name, col, row, erase=False):
+    target_color = grid.get((col, row))
+    if erase:
+        if target_color is None:
+            return
+    else:
+        fill_color = _resolve_fill_color(view_name, col, row)
+        if target_color == fill_color:
+            return
+    stack = [(col, row)]
+    visited = set()
+    while stack:
+        c, r = stack.pop()
+        if (c, r) in visited:
+            continue
+        visited.add((c, r))
+        cell_color = grid.get((c, r))
+        if cell_color != target_color:
+            continue
+        if erase:
+            grid.pop((c, r), None)
+        else:
+            grid[(c, r)] = fill_color
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nc, nr = c + dc, r + dr
+            if 0 <= nc < GRID_SIZE and 0 <= nr < GRID_SIZE:
+                stack.append((nc, nr))
+
+
+def on_click(event, mode="draw"):
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
+    undo_push()
     view_name = canvas_to_name[canvas]
     grid = grids[view_name]
-    if mode == "fill":
-        grid[(col, row)] = _resolve_fill_color(view_name, col, row)
+    if mode == "draw":
+        if current_tool == "fill":
+            flood_fill(grid, view_name, col, row)
+        else:
+            grid[(col, row)] = _resolve_fill_color(view_name, col, row)
     else:
-        grid.pop((col, row), None)
+        if current_tool == "fill":
+            flood_fill(grid, view_name, col, row, erase=True)
+        else:
+            grid.pop((col, row), None)
     mark_dirty()
     draw_grid(canvas)
     update_preview()
 
 
-def on_drag(event, mode="fill"):
+def on_drag(event, mode="draw"):
+    if current_tool == "fill":
+        return
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
     view_name = canvas_to_name[canvas]
     grid = grids[view_name]
-    if mode == "fill":
+    if mode == "draw":
         color = _resolve_fill_color(view_name, col, row)
         if (col, row) not in grid or grid[(col, row)] != color:
             grid[(col, row)] = color
@@ -388,6 +432,33 @@ def main():
         zoom_buttons[level] = btn
 
     zoom_buttons[current_zoom].configure(relief=tk.SUNKEN)
+
+    # Tool selector
+    tool_label = tk.Label(right_panel, text="Tool", bg="#333333", fg="#cccccc")
+    tool_label.pack(pady=(15, 5))
+
+    tool_frame = tk.Frame(right_panel, bg="#333333")
+    tool_frame.pack(pady=5)
+
+    def set_tool(tool):
+        global current_tool
+        current_tool = tool
+        for name, btn in tool_buttons.items():
+            btn.configure(relief=tk.SUNKEN if name == tool else tk.RAISED)
+        cursor = TOOL_CURSORS[tool]
+        for view in grid_views:
+            view.configure(cursor=cursor)
+
+    tool_buttons = {}
+    for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill")):
+        btn = tk.Button(tool_frame, text=label, width=7,
+                        command=lambda t=tool_name: set_tool(t))
+        btn.pack(side=tk.LEFT, padx=2)
+        tool_buttons[tool_name] = btn
+
+    tool_buttons[current_tool].configure(relief=tk.SUNKEN)
+    for view in grid_views:
+        view.configure(cursor=TOOL_CURSORS[current_tool])
 
     # Palette
     palette_label = tk.Label(right_panel, text="Color", bg="#333333", fg="#cccccc")
@@ -614,6 +685,7 @@ def main():
         layers.append({"name": "Top Layer", "top": {}, "front": {}, "side": {}})
         select_layer(0)
         dirty = False
+        undo.clear()
 
     def do_save():
         global dirty
@@ -643,6 +715,7 @@ def main():
             layers.extend(loaded)
             select_layer(0)
             dirty = False
+            undo.clear()
 
     def _composite_view(view):
         composite = {}
@@ -803,7 +876,16 @@ def main():
     load_btn.pack(side=tk.LEFT, padx=5)
 
     export_frame = tk.Frame(right_panel, bg="#333333")
-    export_frame.pack(side=tk.BOTTOM, pady=(0, 10))
+    export_frame.pack(side=tk.BOTTOM, pady=(0, 5))
+
+    controls_text = (
+        "LMB / drag: Draw   RMB / drag: Erase\n"
+        "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo"
+    )
+    controls_label = tk.Label(right_panel, text=controls_text, bg="#333333",
+                              fg="#cccccc", font=("TkDefaultFont", 9),
+                              justify=tk.LEFT, anchor="w")
+    controls_label.pack(side=tk.BOTTOM, padx=5, pady=(0, 5), fill=tk.X)
 
     def do_about():
         win = tk.Toplevel(root)
@@ -827,11 +909,6 @@ def main():
                  font=("TkDefaultFont", 10)).pack(pady=(0, 10))
 
         help_text = (
-            "Controls:\n"
-            "  Left-click / drag    Draw with selected color\n"
-            "  Right-click / drag   Erase\n"
-            "  Alt + Left-click     Pick color from cell\n"
-            "\n"
             "Layers:\n"
             "  Each layer has a visibility checkbox.\n"
             "  Only visible layers are shown in the preview\n"
@@ -869,11 +946,29 @@ def main():
     root.bind("<Configure>", on_resize)
     for view in grid_views:
         view.bind("<Configure>", on_canvas_resize)
-        view.bind("<Button-1>", lambda e: on_click(e, "fill"))
-        view.bind("<B1-Motion>", lambda e: on_drag(e, "fill"))
+        view.bind("<Button-1>", lambda e: on_click(e, "draw"))
+        view.bind("<B1-Motion>", lambda e: on_drag(e, "draw"))
         view.bind("<Button-3>", lambda e: on_click(e, "erase"))
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
         view.bind("<Alt-Button-1>", on_pick_color)
+        view.bind("<Alt-B1-Motion>", on_pick_color)
+
+    def do_undo(event=None):
+        if undo.undo(_layers, _active_layer_idx, grids, select_layer):
+            mark_dirty()
+            for view in grid_views:
+                draw_grid(view)
+            update_preview()
+
+    def do_redo(event=None):
+        if undo.redo(_layers, _active_layer_idx, grids, select_layer):
+            mark_dirty()
+            for view in grid_views:
+                draw_grid(view)
+            update_preview()
+
+    root.bind("<Control-z>", do_undo)
+    root.bind("<Control-y>", do_redo)
 
     def on_close():
         if dirty:
