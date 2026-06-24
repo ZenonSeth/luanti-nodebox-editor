@@ -907,7 +907,7 @@ def main():
 
         tk.Label(win, text="Luanti VHR Node Box Editor", bg="#2a2a2a", fg="#cccccc",
                  font=("TkDefaultFont", 12, "bold")).pack(pady=(15, 4))
-        tk.Label(win, text="Version 0.5.0",
+        tk.Label(win, text="Version 0.6.0",
                  bg="#2a2a2a", fg="#999999", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
         tk.Label(win, text="Visual Hull Reconstruction Node Box Editor",
                  bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
