@@ -1,4 +1,4 @@
-# Luanti Nodebox Editor
+# Luanti Nodebox & Texture Editor
 
 A visual editor for creating [Luanti](https://www.luanti.org/) node box definitions by painting on three orthogonal 2D grid views. The intersection of the three projections (a visual hull) defines a 3D voxel shape, which is automatically decomposed into minimal axis-aligned cuboids for Lua output.
 

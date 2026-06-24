@@ -329,7 +329,7 @@ def main():
     selected_color = settings.get("selected_color", "#0064ff")
 
     root = tk.Tk()
-    root.title("Luanti VHR Node Box Editor")
+    root.title("Luanti VHR Nodebox & Texture Editor")
     geom = settings.get("geometry", "1280x720")
     root.geometry(geom)
     if settings.get("maximized", False):
@@ -905,11 +905,11 @@ def main():
         win.grab_set()
         win.resizable(False, False)
 
-        tk.Label(win, text="Luanti VHR Node Box Editor", bg="#2a2a2a", fg="#cccccc",
+        tk.Label(win, text="Luanti VHR Nodebox & Texture Editor", bg="#2a2a2a", fg="#cccccc",
                  font=("TkDefaultFont", 12, "bold")).pack(pady=(15, 4))
         tk.Label(win, text="Version 0.6.0",
                  bg="#2a2a2a", fg="#999999", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
-        tk.Label(win, text="Visual Hull Reconstruction Node Box Editor",
+        tk.Label(win, text="Visual Hull Reconstruction Nodebox & Texture Editor",
                  bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
         tk.Label(win, text="by Zenon Seth", bg="#2a2a2a", fg="#ccff00",
                  font=("TkDefaultFont", 10)).pack(pady=(0, 10))
