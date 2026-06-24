@@ -91,6 +91,13 @@ def grids_to_faces(top, front, side):
     return voxels_to_faces(voxels)
 
 
+def layers_to_faces(layers):
+    all_voxels = set()
+    for layer in layers:
+        all_voxels |= visual_hull(layer["top"], layer["front"], layer["side"])
+    return voxels_to_faces(all_voxels)
+
+
 def bounding_box(voxels):
     if not voxels:
         return None
@@ -230,3 +237,24 @@ def grids_to_lua(top, front, side):
         fixed = f"{{\n        {lines},\n    }}"
     lua = f"node_box = {{\n    type = \"fixed\",\n    fixed = {fixed},\n}}"
     return lua, method, len(cuboids)
+
+
+def grids_to_lua_layers(layers):
+    all_entries = []
+    methods = []
+    for layer in layers:
+        cuboids, method = grids_to_cuboids(layer["top"], layer["front"], layer["side"])
+        if cuboids:
+            all_entries.extend(cuboid_to_lua_entry(*c) for c in cuboids)
+            methods.append(method)
+    if not all_entries:
+        return "-- No voxels to export", None, 0
+    method = methods[0] if len(set(methods)) == 1 else "/".join(methods)
+    count = len(all_entries)
+    if count == 1:
+        fixed = all_entries[0]
+    else:
+        lines = ",\n        ".join(all_entries)
+        fixed = f"{{\n        {lines},\n    }}"
+    lua = f"node_box = {{\n    type = \"fixed\",\n    fixed = {fixed},\n}}"
+    return lua, method, count

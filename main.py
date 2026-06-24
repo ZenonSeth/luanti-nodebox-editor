@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, grids_to_lua
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers
 from preview3d import render_preview
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -176,11 +176,16 @@ preview_canvas = None
 preview_azimuth = 35
 preview_elevation = 25
 cached_faces = []
+preview_all_layers = False
+_layers = None
 
 
 def rebuild_faces():
     global cached_faces
-    cached_faces = grids_to_faces(grids["top"], grids["front"], grids["side"])
+    if preview_all_layers and _layers:
+        cached_faces = layers_to_faces(_layers)
+    else:
+        cached_faces = grids_to_faces(grids["top"], grids["front"], grids["side"])
     redraw_preview()
 
 
@@ -372,6 +377,97 @@ def main():
     palette_canvas.bind("<Configure>", draw_palette)
     palette_canvas.bind("<Button-1>", on_palette_click)
 
+    # Layers
+    layers_label = tk.Label(right_panel, text="Layers", bg="#333333", fg="#cccccc")
+    layers_label.pack(pady=(15, 5))
+
+    layers_frame = tk.Frame(right_panel, bg="#333333")
+    layers_frame.pack(padx=5, fill=tk.BOTH, expand=True)
+
+    layer_listbox = tk.Listbox(layers_frame, bg="#1a1a1a", fg="#cccccc",
+                               selectbackground="#4a6a8a", selectforeground="#ffffff",
+                               highlightthickness=0, borderwidth=1,
+                               relief=tk.SUNKEN, font=("TkDefaultFont", 9))
+    layer_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
+    layer_btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
+
+    global _layers
+    layers = [{"name": "Layer 1", "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
+    _layers = layers
+    active_layer_idx = [0]
+
+    def refresh_layer_list():
+        layer_listbox.delete(0, tk.END)
+        for layer in layers:
+            layer_listbox.insert(tk.END, layer["name"])
+        layer_listbox.selection_set(active_layer_idx[0])
+
+    def select_layer(idx):
+        if idx < 0 or idx >= len(layers):
+            return
+        active_layer_idx[0] = idx
+        grids["top"] = layers[idx]["top"]
+        grids["front"] = layers[idx]["front"]
+        grids["side"] = layers[idx]["side"]
+        refresh_layer_list()
+        for view in grid_views:
+            draw_grid(view)
+        update_preview()
+
+    def on_layer_select(event):
+        sel = layer_listbox.curselection()
+        if sel:
+            select_layer(sel[0])
+
+    layer_listbox.bind("<<ListboxSelect>>", on_layer_select)
+
+    def do_new_layer():
+        idx = len(layers) + 1
+        layers.append({"name": f"Layer {idx}", "top": {}, "front": {}, "side": {}})
+        select_layer(len(layers) - 1)
+        mark_dirty()
+
+    def do_clone_layer():
+        src = layers[active_layer_idx[0]]
+        layers.append({
+            "name": f"{src['name']} copy",
+            "top": dict(src["top"]),
+            "front": dict(src["front"]),
+            "side": dict(src["side"]),
+        })
+        select_layer(len(layers) - 1)
+        mark_dirty()
+
+    def do_del_layer():
+        if len(layers) <= 1:
+            return
+        del layers[active_layer_idx[0]]
+        select_layer(min(active_layer_idx[0], len(layers) - 1))
+        mark_dirty()
+
+    new_layer_btn = tk.Button(layer_btn_frame, text="New", width=5, command=do_new_layer)
+    new_layer_btn.pack(pady=2)
+
+    clone_layer_btn = tk.Button(layer_btn_frame, text="Clone", width=5, command=do_clone_layer)
+    clone_layer_btn.pack(pady=2)
+
+    del_layer_btn = tk.Button(layer_btn_frame, text="Del", width=5, command=do_del_layer)
+    del_layer_btn.pack(pady=2)
+
+    def toggle_preview_all():
+        global preview_all_layers
+        preview_all_layers = not preview_all_layers
+        preview_all_btn.configure(relief=tk.SUNKEN if preview_all_layers else tk.RAISED)
+        update_preview()
+
+    preview_all_btn = tk.Button(layers_frame, text="Show All", width=7,
+                                command=toggle_preview_all, relief=tk.RAISED)
+    preview_all_btn.pack(side=tk.BOTTOM, pady=(5, 0))
+
+    refresh_layer_list()
+
     # Save/Load buttons at bottom
     button_frame = tk.Frame(right_panel, bg="#333333")
     button_frame.pack(side=tk.BOTTOM, pady=10)
@@ -388,13 +484,10 @@ def main():
         if not check_unsaved():
             return
         global dirty
-        grids["top"] = {}
-        grids["front"] = {}
-        grids["side"] = {}
+        layers.clear()
+        layers.append({"name": "Layer 1", "top": {}, "front": {}, "side": {}})
+        select_layer(0)
         dirty = False
-        for view in grid_views:
-            draw_grid(view)
-        update_preview()
 
     def do_save():
         global dirty
@@ -403,7 +496,7 @@ def main():
             filetypes=[("NodeBox files", "*.nbx")],
         )
         if path:
-            json_str = save_nbx(grids["top"], grids["front"], grids["side"])
+            json_str = save_nbx(layers)
             with open(path, "w") as f:
                 f.write(json_str)
             dirty = False
@@ -418,17 +511,14 @@ def main():
         if path:
             with open(path, "r") as f:
                 json_str = f.read()
-            top, front, side = load_nbx(json_str)
-            grids["top"] = top
-            grids["front"] = front
-            grids["side"] = side
+            loaded = load_nbx(json_str)
+            layers.clear()
+            layers.extend(loaded)
+            select_layer(0)
             dirty = False
-            for view in grid_views:
-                draw_grid(view)
-            update_preview()
 
     def do_export():
-        lua_code, method, count = grids_to_lua(grids["top"], grids["front"], grids["side"])
+        lua_code, method, count = grids_to_lua_layers(layers)
         win = tk.Toplevel(root)
         win.title("Export Lua")
         win.geometry("500x340")

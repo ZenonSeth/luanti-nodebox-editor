@@ -58,9 +58,11 @@ def _encode_grid(grid, encode_row_fn):
     return rows
 
 
-def save_nbx(top, front, side):
-    grids = [top, front, side]
-    colors = _collect_colors(grids)
+def save_nbx(layers):
+    all_grids = []
+    for layer in layers:
+        all_grids.extend([layer["top"], layer["front"], layer["side"]])
+    colors = _collect_colors(all_grids)
 
     if len(colors) <= MAX_INDEXED_COLORS:
         palette_map = {}
@@ -70,21 +72,35 @@ def save_nbx(top, front, side):
             palette_map[color] = char
             palette_out[char] = color
 
+        encoded_layers = []
+        for layer in layers:
+            encoded_layers.append({
+                "name": layer["name"],
+                "top": _encode_grid(layer["top"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
+                "front": _encode_grid(layer["front"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
+                "side": _encode_grid(layer["side"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
+            })
+
         data = {
             "version": 1,
             "type": "indexed",
             "palette": palette_out,
-            "top": _encode_grid(top, lambda g, r: _encode_row_indexed(g, r, palette_map)),
-            "front": _encode_grid(front, lambda g, r: _encode_row_indexed(g, r, palette_map)),
-            "side": _encode_grid(side, lambda g, r: _encode_row_indexed(g, r, palette_map)),
+            "layers": encoded_layers,
         }
     else:
+        encoded_layers = []
+        for layer in layers:
+            encoded_layers.append({
+                "name": layer["name"],
+                "top": _encode_grid(layer["top"], _encode_row_inline),
+                "front": _encode_grid(layer["front"], _encode_row_inline),
+                "side": _encode_grid(layer["side"], _encode_row_inline),
+            })
+
         data = {
             "version": 1,
             "type": "inline",
-            "top": _encode_grid(top, _encode_row_inline),
-            "front": _encode_grid(front, _encode_row_inline),
-            "side": _encode_grid(side, _encode_row_inline),
+            "layers": encoded_layers,
         }
 
     return json.dumps(data, indent=2)
@@ -150,8 +166,18 @@ def load_nbx(json_str):
     else:
         decode_fn = _decode_row_inline
 
-    top = _decode_grid(data["top"], decode_fn)
-    front = _decode_grid(data["front"], decode_fn)
-    side = _decode_grid(data["side"], decode_fn)
+    if "layers" in data:
+        layers = []
+        for layer_data in data["layers"]:
+            layers.append({
+                "name": layer_data.get("name", f"Layer {len(layers) + 1}"),
+                "top": _decode_grid(layer_data["top"], decode_fn),
+                "front": _decode_grid(layer_data["front"], decode_fn),
+                "side": _decode_grid(layer_data["side"], decode_fn),
+            })
+        return layers
 
-    return top, front, side
+    return [{"name": "Layer 1",
+             "top": _decode_grid(data["top"], decode_fn),
+             "front": _decode_grid(data["front"], decode_fn),
+             "side": _decode_grid(data["side"], decode_fn)}]
