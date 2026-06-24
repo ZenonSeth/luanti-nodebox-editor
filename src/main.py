@@ -339,31 +339,31 @@ def main():
     content = tk.Frame(root, bg="#000000")
     content.place(relx=0.5, rely=0.5, anchor="center")
 
-    content.columnconfigure(0, weight=2, uniform="col")
+    content.columnconfigure(0, weight=1, uniform="col")
     content.columnconfigure(1, weight=2, uniform="col")
-    content.columnconfigure(2, weight=1, uniform="col")
+    content.columnconfigure(2, weight=2, uniform="col")
     content.rowconfigure(0, weight=1, uniform="row")
     content.rowconfigure(1, weight=1, uniform="row")
 
     top_frame = tk.Frame(content, bg="#2a2a2a")
-    top_frame.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+    top_frame.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
     tk.Label(top_frame, text="Top", bg="#2a2a2a", fg="#999999",
              font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
     top_view = tk.Canvas(top_frame, bg="#2a2a2a", highlightthickness=0)
     top_view.place(relx=0.5, rely=0.5, anchor="center")
 
     preview_3d = tk.Canvas(content, bg="#1a1a1a", highlightthickness=0)
-    preview_3d.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+    preview_3d.grid(row=0, column=2, sticky="nsew", padx=1, pady=1)
 
     front_frame = tk.Frame(content, bg="#2a2a2a")
-    front_frame.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
+    front_frame.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
     tk.Label(front_frame, text="Front", bg="#2a2a2a", fg="#999999",
              font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
     front_view = tk.Canvas(front_frame, bg="#2a2a2a", highlightthickness=0)
     front_view.place(relx=0.5, rely=0.5, anchor="center")
 
     side_frame = tk.Frame(content, bg="#2a2a2a")
-    side_frame.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+    side_frame.grid(row=1, column=2, sticky="nsew", padx=1, pady=1)
     tk.Label(side_frame, text="Side", bg="#2a2a2a", fg="#999999",
              font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
     side_view = tk.Canvas(side_frame, bg="#2a2a2a", highlightthickness=0)
@@ -405,8 +405,8 @@ def main():
     preview_3d.bind("<B1-Motion>", on_preview_drag)
     preview_3d.bind("<Configure>", lambda e: redraw_preview())
 
-    right_panel = tk.Frame(content, bg="#333333")
-    right_panel.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=1, pady=1)
+    left_panel = tk.Frame(content, bg="#333333")
+    left_panel.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=1, pady=1)
 
     canvas_to_name[top_view] = "top"
     canvas_to_name[front_view] = "front"
@@ -415,10 +415,10 @@ def main():
     grid_views = [top_view, front_view, side_view]
 
     # Zoom controls
-    zoom_label = tk.Label(right_panel, text="Zoom", bg="#333333", fg="#cccccc")
+    zoom_label = tk.Label(left_panel, text="Zoom", bg="#333333", fg="#cccccc")
     zoom_label.pack(pady=(10, 5))
 
-    zoom_frame = tk.Frame(right_panel, bg="#333333")
+    zoom_frame = tk.Frame(left_panel, bg="#333333")
     zoom_frame.pack(pady=5)
 
     def set_zoom(level):
@@ -442,10 +442,10 @@ def main():
     zoom_buttons[current_zoom].configure(relief=tk.SUNKEN)
 
     # Tool selector
-    tool_label = tk.Label(right_panel, text="Tool", bg="#333333", fg="#cccccc")
+    tool_label = tk.Label(left_panel, text="Tool", bg="#333333", fg="#cccccc")
     tool_label.pack(pady=(15, 5))
 
-    tool_frame = tk.Frame(right_panel, bg="#333333")
+    tool_frame = tk.Frame(left_panel, bg="#333333")
     tool_frame.pack(pady=5)
 
     def set_tool(tool):
@@ -469,17 +469,17 @@ def main():
         view.configure(cursor=TOOL_CURSORS[current_tool])
 
     # Palette
-    palette_label = tk.Label(right_panel, text="Color", bg="#333333", fg="#cccccc")
+    palette_label = tk.Label(left_panel, text="Color", bg="#333333", fg="#cccccc")
     palette_label.pack(pady=(15, 5))
 
     global color_indicator
-    color_indicator = tk.Canvas(right_panel, width=30, height=30,
+    color_indicator = tk.Canvas(left_panel, width=30, height=30,
                                 bg=selected_color, highlightthickness=1,
                                 highlightbackground="#666666")
     color_indicator.pack(pady=(0, 5))
 
-    palette_area = tk.Frame(right_panel, bg="#333333")
-    palette_area.pack(padx=5, fill=tk.X)
+    palette_area = tk.Frame(left_panel, bg="#333333")
+    palette_area.pack(padx=15, pady=(10, 0), fill=tk.X)
 
     palette_canvas = tk.Canvas(palette_area, bg="#333333", highlightthickness=0)
     palette_canvas.pack(side=tk.LEFT, fill=tk.Y)
@@ -558,10 +558,10 @@ def main():
         pick_btn.pack(side=tk.LEFT, padx=(1, 0))
 
     # Layers
-    layers_label = tk.Label(right_panel, text="Layers", bg="#333333", fg="#cccccc")
-    layers_label.pack(pady=(15, 5))
+    layers_label = tk.Label(left_panel, text="Layers", bg="#333333", fg="#cccccc")
+    layers_label.pack(pady=(20, 5))
 
-    layers_frame = tk.Frame(right_panel, bg="#333333")
+    layers_frame = tk.Frame(left_panel, bg="#333333")
     layers_frame.pack(padx=5, fill=tk.X)
 
     layer_list_frame = tk.Frame(layers_frame, bg="#1a1a1a", height=160,
@@ -671,7 +671,7 @@ def main():
     refresh_layer_list()
 
     # Save/Load buttons at bottom
-    button_frame = tk.Frame(right_panel, bg="#333333")
+    button_frame = tk.Frame(left_panel, bg="#333333")
     button_frame.pack(side=tk.BOTTOM, pady=10)
 
     def check_unsaved():
@@ -880,7 +880,7 @@ def main():
     load_btn = tk.Button(button_frame, text="Load", width=8, command=do_load)
     load_btn.pack(side=tk.LEFT, padx=5)
 
-    export_frame = tk.Frame(right_panel, bg="#333333")
+    export_frame = tk.Frame(left_panel, bg="#333333")
     export_frame.pack(side=tk.BOTTOM, pady=(0, 5))
 
     controls_text = (
@@ -888,7 +888,7 @@ def main():
         "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo\n"
         "Y: Pencil tool   F: Fill tool"
     )
-    controls_label = tk.Label(right_panel, text=controls_text, bg="#333333",
+    controls_label = tk.Label(left_panel, text=controls_text, bg="#333333",
                               fg="#cccccc", font=("TkDefaultFont", 9),
                               justify=tk.LEFT, anchor="w")
     controls_label.pack(side=tk.BOTTOM, padx=5, pady=(0, 5), fill=tk.X)
