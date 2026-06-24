@@ -104,6 +104,14 @@ FACE_VIEW = {
     "right": "side", "left": "side",
 }
 
+NODE_START = 16
+NODE_END = 48
+NODE_CELLS = NODE_END - NODE_START
+
+
+def _wrap(v):
+    return NODE_START + (v - NODE_START) % NODE_CELLS
+
 
 def _voxels_to_colored_faces(voxel_set, color_maps):
     top, front, side = color_maps
@@ -112,12 +120,13 @@ def _voxels_to_colored_faces(voxel_set, color_maps):
         for name, (dx, dy, dz) in ADJACENT.items():
             if (x + dx, y + dy, z + dz) not in voxel_set:
                 view = FACE_VIEW[name]
+                wx, wy, wz = _wrap(x), _wrap(y), _wrap(z)
                 if view == "top":
-                    color = top.get((x, z))
+                    color = top.get((wx, wz))
                 elif view == "front":
-                    color = front.get((x, y))
+                    color = front.get((wx, wy))
                 else:
-                    color = side.get((z, y))
+                    color = side.get((wz, wy))
                 faces.append((x, y, z, name, color))
     return faces
 
