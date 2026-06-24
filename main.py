@@ -176,6 +176,7 @@ preview_elevation = 25
 cached_faces = []
 preview_all_layers = False
 _layers = None
+_active_layer_idx = 0
 
 
 def rebuild_faces():
@@ -202,14 +203,23 @@ def mark_dirty():
     dirty = True
 
 
+def _resolve_fill_color(view_name, col, row):
+    if _active_layer_idx != 0 and _layers:
+        top_layer_grid = _layers[0][view_name]
+        if (col, row) in top_layer_grid:
+            return top_layer_grid[(col, row)]
+    return selected_color
+
+
 def on_click(event, mode="fill"):
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
-    grid = grids[canvas_to_name[canvas]]
+    view_name = canvas_to_name[canvas]
+    grid = grids[view_name]
     if mode == "fill":
-        grid[(col, row)] = selected_color
+        grid[(col, row)] = _resolve_fill_color(view_name, col, row)
     else:
         grid.pop((col, row), None)
     mark_dirty()
@@ -222,10 +232,12 @@ def on_drag(event, mode="fill"):
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
-    grid = grids[canvas_to_name[canvas]]
+    view_name = canvas_to_name[canvas]
+    grid = grids[view_name]
     if mode == "fill":
-        if (col, row) not in grid or grid[(col, row)] != selected_color:
-            grid[(col, row)] = selected_color
+        color = _resolve_fill_color(view_name, col, row)
+        if (col, row) not in grid or grid[(col, row)] != color:
+            grid[(col, row)] = color
             mark_dirty()
             draw_grid(canvas)
             update_preview()
@@ -417,21 +429,22 @@ def main():
     layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
     layer_btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
 
-    global _layers
-    layers = [{"name": "Layer 1", "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
+    global _layers, _active_layer_idx
+    layers = [{"name": "Top Layer", "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
     _layers = layers
-    active_layer_idx = [0]
+    _active_layer_idx = 0
 
     def refresh_layer_list():
         layer_listbox.delete(0, tk.END)
         for layer in layers:
             layer_listbox.insert(tk.END, layer["name"])
-        layer_listbox.selection_set(active_layer_idx[0])
+        layer_listbox.selection_set(_active_layer_idx)
 
     def select_layer(idx):
+        global _active_layer_idx
         if idx < 0 or idx >= len(layers):
             return
-        active_layer_idx[0] = idx
+        _active_layer_idx = idx
         grids["top"] = layers[idx]["top"]
         grids["front"] = layers[idx]["front"]
         grids["side"] = layers[idx]["side"]
@@ -454,7 +467,7 @@ def main():
         mark_dirty()
 
     def do_clone_layer():
-        src = layers[active_layer_idx[0]]
+        src = layers[_active_layer_idx]
         layers.append({
             "name": f"{src['name']} copy",
             "top": dict(src["top"]),
@@ -467,8 +480,10 @@ def main():
     def do_del_layer():
         if len(layers) <= 1:
             return
-        del layers[active_layer_idx[0]]
-        select_layer(min(active_layer_idx[0], len(layers) - 1))
+        if _active_layer_idx == 0:
+            return
+        del layers[_active_layer_idx]
+        select_layer(min(_active_layer_idx, len(layers) - 1))
         mark_dirty()
 
     new_layer_btn = tk.Button(layer_btn_frame, text="New", width=5, command=do_new_layer)
@@ -509,7 +524,7 @@ def main():
             return
         global dirty
         layers.clear()
-        layers.append({"name": "Layer 1", "top": {}, "front": {}, "side": {}})
+        layers.append({"name": "Top Layer", "top": {}, "front": {}, "side": {}})
         select_layer(0)
         dirty = False
 
@@ -536,6 +551,7 @@ def main():
             with open(path, "r") as f:
                 json_str = f.read()
             loaded = load_nbx(json_str)
+            loaded[0]["name"] = "Top Layer"
             layers.clear()
             layers.extend(loaded)
             select_layer(0)
@@ -592,8 +608,8 @@ def main():
 
     def do_about():
         win = tk.Toplevel(root)
-        win.title("About")
-        w, h = 320, 160
+        win.title("Help / About")
+        w, h = 400, 340
         sx = root.winfo_x() + (root.winfo_width() - w) // 2
         sy = root.winfo_y() + (root.winfo_height() - h) // 2
         win.geometry(f"{w}x{h}+{sx}+{sy}")
@@ -603,19 +619,35 @@ def main():
         win.resizable(False, False)
 
         tk.Label(win, text="Luanti VHR Node Box Editor", bg="#2a2a2a", fg="#cccccc",
-                 font=("TkDefaultFont", 12, "bold")).pack(pady=(20, 4))
+                 font=("TkDefaultFont", 12, "bold")).pack(pady=(15, 4))
         tk.Label(win, text="Version 0.5.0",
                  bg="#2a2a2a", fg="#999999", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
         tk.Label(win, text="Visual Hull Reconstruction Node Box Editor",
-                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 8))
+                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
         tk.Label(win, text="by Zenon Seth", bg="#2a2a2a", fg="#ccff00",
-                 font=("TkDefaultFont", 10)).pack(pady=(0, 12))
+                 font=("TkDefaultFont", 10)).pack(pady=(0, 10))
+
+        help_text = (
+            "Controls:\n"
+            "  Left-click / drag    Draw with selected color\n"
+            "  Right-click / drag   Erase\n"
+            "\n"
+            "Layers:\n"
+            "  The Top Layer defines shape and color.\n"
+            "  Additional layers also have shape and color,\n"
+            "  but where a pixel overlaps the Top Layer, the\n"
+            "  Top Layer's color is used instead."
+        )
+        tk.Label(win, text=help_text, bg="#2a2a2a", fg="#cccccc",
+                 font=("TkDefaultFont", 9), justify=tk.LEFT, anchor="w").pack(
+                     padx=20, pady=(0, 10), fill=tk.X)
+
         tk.Button(win, text="Close", width=8, command=win.destroy).pack()
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
 
-    about_btn = tk.Button(export_frame, text="About", width=8, command=do_about)
+    about_btn = tk.Button(export_frame, text="Help/About", width=8, command=do_about)
     about_btn.pack(side=tk.LEFT, padx=5)
 
     def on_resize(event):
