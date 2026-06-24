@@ -86,7 +86,7 @@ def build_palette():
 selected_color = "#0064ff"
 color_indicator = None
 current_tool = "pencil"
-TOOL_CURSORS = {"pencil": "pencil", "fill": "spraycan"}
+TOOL_CURSORS = {"pencil": "tcross", "fill": "target"}
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -880,7 +880,8 @@ def main():
 
     controls_text = (
         "LMB / drag: Draw   RMB / drag: Erase\n"
-        "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo"
+        "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo\n"
+        "Y: Pencil tool   F: Fill tool"
     )
     controls_label = tk.Label(right_panel, text=controls_text, bg="#333333",
                               fg="#cccccc", font=("TkDefaultFont", 9),
@@ -969,6 +970,8 @@ def main():
 
     root.bind("<Control-z>", do_undo)
     root.bind("<Control-y>", do_redo)
+    root.bind("y", lambda e: set_tool("pencil"))
+    root.bind("f", lambda e: set_tool("fill"))
 
     def on_close():
         if dirty:
