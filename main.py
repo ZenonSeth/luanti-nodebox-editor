@@ -83,7 +83,7 @@ def build_palette():
     return rows
 
 
-selected_color = "#0064ff"
+selected_color = None
 color_indicator = None
 current_tool = "pencil"
 TOOL_CURSORS = {"pencil": "tcross", "fill": "target"}
@@ -217,6 +217,14 @@ def mark_dirty():
     dirty = True
 
 
+def set_color(color):
+    global selected_color
+    selected_color = color
+    color_indicator.configure(bg=selected_color)
+    settings["selected_color"] = selected_color
+    save_settings(settings)
+
+
 def _resolve_fill_color(view_name, col, row):
     if not (NODE_START <= col < NODE_END and NODE_START <= row < NODE_END):
         return "#000000"
@@ -236,9 +244,7 @@ def on_pick_color(event):
     grid = grids[view_name]
     color = grid.get((col, row))
     if color:
-        global selected_color
-        selected_color = color
-        color_indicator.configure(bg=selected_color)
+        set_color(color)
 
 
 def flood_fill(grid, view_name, col, row, erase=False):
@@ -319,6 +325,8 @@ def on_drag(event, mode="draw"):
 
 def main():
     global current_zoom, selected_color
+
+    selected_color = settings.get("selected_color", "#0064ff")
 
     root = tk.Tk()
     root.title("Luanti VHR Node Box Editor")
@@ -507,8 +515,7 @@ def main():
         col = int(event.x / cell_w)
         row = int(event.y / cell_h)
         if 0 <= row < len(palette_rows) and 0 <= col < len(palette_rows[row]):
-            selected_color = palette_rows[row][col]
-            color_indicator.configure(bg=selected_color)
+            set_color(palette_rows[row][col])
 
     palette_area.bind("<Configure>", draw_palette)
     palette_canvas.bind("<Button-1>", on_palette_click)
@@ -532,9 +539,7 @@ def main():
             save_settings(settings)
 
     def select_custom_color(idx):
-        global selected_color
-        selected_color = custom_colors[idx]
-        color_indicator.configure(bg=selected_color)
+        set_color(custom_colors[idx])
 
     for i in range(CUSTOM_SLOTS):
         row_idx = i // 2
@@ -975,11 +980,14 @@ def main():
 
     def on_close():
         if dirty:
-            if not messagebox.askyesno(
+            result = messagebox.askyesnocancel(
                 "Unsaved Changes",
-                "You have unsaved changes. Quit without saving?"
-            ):
+                "Do you wish to save your changes before exiting?"
+            )
+            if result is None:
                 return
+            if result:
+                do_save()
         maximized = root.state() == "zoomed"
         settings["maximized"] = maximized
         if not maximized:
