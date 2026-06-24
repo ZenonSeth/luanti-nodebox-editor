@@ -81,7 +81,7 @@ def build_palette():
     return rows
 
 
-selected_color = "#5b8fb9"
+selected_color = "#0064ff"
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -374,18 +374,21 @@ def main():
                                 highlightbackground="#666666")
     color_indicator.pack(pady=(0, 5))
 
-    palette_canvas = tk.Canvas(right_panel, bg="#333333", highlightthickness=0)
-    palette_canvas.pack(padx=5, fill=tk.X)
+    palette_area = tk.Frame(right_panel, bg="#333333")
+    palette_area.pack(padx=5, fill=tk.X)
+
+    palette_canvas = tk.Canvas(palette_area, bg="#333333", highlightthickness=0)
+    palette_canvas.pack(side=tk.LEFT, fill=tk.Y)
 
     palette_rows = build_palette()
 
     def draw_palette(event=None):
         palette_canvas.delete("all")
-        w = palette_canvas.winfo_width()
+        w = palette_area.winfo_width()
         if w <= 1:
             return
-        cell_w = (w * 0.75) / PALETTE_STEPS
-        cell_h = cell_w * 0.5
+        cell_w = (w * 0.375) / PALETTE_STEPS
+        cell_h = cell_w
         for row_idx, row in enumerate(palette_rows):
             for col_idx, color in enumerate(row):
                 x1 = col_idx * cell_w
@@ -394,40 +397,89 @@ def main():
                     x1, y1, x1 + cell_w, y1 + cell_h,
                     fill=color, outline="#222222"
                 )
+        total_width = PALETTE_STEPS * cell_w
         total_height = len(palette_rows) * cell_h
-        palette_canvas.configure(height=int(total_height))
+        palette_canvas.configure(width=int(total_width), height=int(total_height))
 
     def on_palette_click(event):
         global selected_color
-        w = palette_canvas.winfo_width()
+        w = palette_area.winfo_width()
         if w <= 1:
             return
-        cell_w = (w * 0.75) / PALETTE_STEPS
-        cell_h = cell_w * 0.5
+        cell_w = (w * 0.375) / PALETTE_STEPS
+        cell_h = cell_w
         col = int(event.x / cell_w)
         row = int(event.y / cell_h)
         if 0 <= row < len(palette_rows) and 0 <= col < len(palette_rows[row]):
             selected_color = palette_rows[row][col]
             color_indicator.configure(bg=selected_color)
 
-    palette_canvas.bind("<Configure>", draw_palette)
+    palette_area.bind("<Configure>", draw_palette)
     palette_canvas.bind("<Button-1>", on_palette_click)
+
+    # Custom color palette
+    CUSTOM_SLOTS = 16
+    saved_custom = settings.get("custom_colors", None)
+    custom_colors = list(saved_custom) if saved_custom and len(saved_custom) == CUSTOM_SLOTS else ["#ffffff"] * CUSTOM_SLOTS
+    custom_swatches = []
+
+    custom_frame = tk.Frame(palette_area, bg="#333333")
+    custom_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+
+    def pick_custom_color(idx):
+        from tkinter import colorchooser
+        result = colorchooser.askcolor(initialcolor=custom_colors[idx], title="Pick Color")
+        if result[1]:
+            custom_colors[idx] = result[1]
+            custom_swatches[idx].configure(bg=custom_colors[idx])
+            settings["custom_colors"] = list(custom_colors)
+            save_settings(settings)
+
+    def select_custom_color(idx):
+        global selected_color
+        selected_color = custom_colors[idx]
+        color_indicator.configure(bg=selected_color)
+
+    for i in range(CUSTOM_SLOTS):
+        row_idx = i // 2
+        col_idx = i % 2
+        slot_frame = tk.Frame(custom_frame, bg="#333333")
+        slot_frame.grid(row=row_idx, column=col_idx * 2, columnspan=2, sticky="w", padx=1, pady=1)
+
+        swatch = tk.Button(slot_frame, bg=custom_colors[i], width=2, height=1,
+                           relief=tk.RAISED, borderwidth=1,
+                           command=lambda idx=i: select_custom_color(idx))
+        swatch.pack(side=tk.LEFT)
+        custom_swatches.append(swatch)
+
+        pick_btn = tk.Button(slot_frame, text="●", width=1, font=("TkDefaultFont", 6),
+                             command=lambda idx=i: pick_custom_color(idx))
+        pick_btn.pack(side=tk.LEFT, padx=(1, 0))
 
     # Layers
     layers_label = tk.Label(right_panel, text="Layers", bg="#333333", fg="#cccccc")
     layers_label.pack(pady=(15, 5))
 
     layers_frame = tk.Frame(right_panel, bg="#333333")
-    layers_frame.pack(padx=5, fill=tk.BOTH, expand=True)
+    layers_frame.pack(padx=5, fill=tk.X)
 
-    layer_listbox = tk.Listbox(layers_frame, bg="#1a1a1a", fg="#cccccc",
+    layer_list_frame = tk.Frame(layers_frame, bg="#333333", height=160)
+    layer_list_frame.pack(fill=tk.X)
+    layer_list_frame.pack_propagate(False)
+
+    layer_scrollbar = tk.Scrollbar(layer_list_frame, orient=tk.VERTICAL)
+    layer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    layer_listbox = tk.Listbox(layer_list_frame, bg="#1a1a1a", fg="#cccccc",
                                selectbackground="#4a6a8a", selectforeground="#ffffff",
                                highlightthickness=0, borderwidth=1,
-                               relief=tk.SUNKEN, font=("TkDefaultFont", 9))
+                               relief=tk.SUNKEN, font=("TkDefaultFont", 9),
+                               yscrollcommand=layer_scrollbar.set)
     layer_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    layer_scrollbar.configure(command=layer_listbox.yview)
 
     layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
-    layer_btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
+    layer_btn_frame.pack(pady=(5, 0))
 
     global _layers, _active_layer_idx
     layers = [{"name": "Top Layer", "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
@@ -487,13 +539,13 @@ def main():
         mark_dirty()
 
     new_layer_btn = tk.Button(layer_btn_frame, text="New", width=5, command=do_new_layer)
-    new_layer_btn.pack(pady=2)
+    new_layer_btn.pack(side=tk.LEFT, padx=2)
 
     clone_layer_btn = tk.Button(layer_btn_frame, text="Clone", width=5, command=do_clone_layer)
-    clone_layer_btn.pack(pady=2)
+    clone_layer_btn.pack(side=tk.LEFT, padx=2)
 
     del_layer_btn = tk.Button(layer_btn_frame, text="Del", width=5, command=do_del_layer)
-    del_layer_btn.pack(pady=2)
+    del_layer_btn.pack(side=tk.LEFT, padx=2)
 
     def toggle_preview_all():
         global preview_all_layers
@@ -675,6 +727,12 @@ def main():
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
 
     def on_close():
+        if dirty:
+            if not messagebox.askyesno(
+                "Unsaved Changes",
+                "You have unsaved changes. Quit without saving?"
+            ):
+                return
         maximized = root.state() == "zoomed"
         settings["maximized"] = maximized
         if not maximized:
