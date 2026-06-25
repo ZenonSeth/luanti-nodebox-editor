@@ -421,9 +421,11 @@ def main():
 
     COPYABLE_VIEWS = {"top", "front", "side"}
 
-    CROSS_COPY = {
-        "front": {False: ("side", "Left"), True: ("right", "Right")},
-        "side":  {False: ("front", "Front"), True: ("back", "Back")},
+    CROSS_COPY_PAIR = {"front": "side", "side": "front"}
+    FACE_LABELS = {
+        "top": "Top", "bottom": "Bottom",
+        "front": "Front", "back": "Back",
+        "side": "Left", "right": "Right",
     }
 
     def copy_from_other(view_name):
@@ -442,8 +444,7 @@ def main():
         update_preview()
 
     def cross_copy(view_name):
-        is_rev = view_reverse[view_name]
-        source_key, _ = CROSS_COPY[view_name][is_rev]
+        source_key = _grid_key(CROSS_COPY_PAIR[view_name])
         layer = layers[_active_layer_idx]
         dest_key = _grid_key(view_name)
         undo_push()
@@ -464,8 +465,8 @@ def main():
             view_copy_buttons[view_name].place(x=4, y=76, anchor="nw")
         else:
             view_copy_buttons[view_name].place_forget()
-        if view_name in CROSS_COPY:
-            _, source_label = CROSS_COPY[view_name][is_rev]
+        if view_name in CROSS_COPY_PAIR:
+            source_label = FACE_LABELS[_grid_key(CROSS_COPY_PAIR[view_name])]
             view_cross_copy_buttons[view_name].configure(text=f"Copy from {source_label}")
             view_cross_copy_buttons[view_name].place(x=4, y=118, anchor="nw")
 
@@ -474,17 +475,20 @@ def main():
         grids[view_name] = layers[_active_layer_idx][_grid_key(view_name)]
         is_rev = view_reverse[view_name]
         view_title_labels[view_name].configure(
-            text=REVERSE_LABELS[view_name] if is_rev else PRIMARY_LABELS[view_name])
+            text=REVERSE_LABELS[view_name] if is_rev else f"● {PRIMARY_LABELS[view_name]}",
+            fg="#999999" if is_rev else "#88bbff")
         view_toggle_buttons[view_name].configure(
             text=f"Switch to {PRIMARY_LABELS[view_name]}" if is_rev else f"Switch to {REVERSE_LABELS[view_name]}")
         _update_copy_button(view_name)
+        if view_name in CROSS_COPY_PAIR:
+            _update_copy_button(CROSS_COPY_PAIR[view_name])
         draw_grid(name_to_canvas[view_name])
         update_preview()
 
     def _make_view_frame(parent, row, col, view_name, label_text):
         frame = tk.Frame(parent, bg="#2a2a2a")
         frame.grid(row=row, column=col, sticky="nsew", padx=1, pady=1)
-        lbl = tk.Label(frame, text=label_text, bg="#2a2a2a", fg="#999999",
+        lbl = tk.Label(frame, text=f"● {label_text}", bg="#2a2a2a", fg="#88bbff",
                        font=("TkDefaultFont", 11, "bold"))
         lbl.place(x=4, y=4, anchor="nw")
         view_title_labels[view_name] = lbl
@@ -503,8 +507,8 @@ def main():
         view_copy_buttons[view_name] = copy_btn
         if view_name in COPYABLE_VIEWS:
             copy_btn.place(x=4, y=76, anchor="nw")
-        if view_name in CROSS_COPY:
-            _, initial_label = CROSS_COPY[view_name][False]
+        if view_name in CROSS_COPY_PAIR:
+            initial_label = FACE_LABELS[CROSS_COPY_PAIR[view_name]]
             cross_btn = tk.Button(frame, text=f"Copy from {initial_label}",
                                   bg="#3a3a3a", fg="#bbbbbb",
                                   font=("TkDefaultFont", 9), relief=tk.FLAT,
@@ -1199,7 +1203,7 @@ def main():
     def do_about():
         win = tk.Toplevel(root)
         win.title("Help / About")
-        w, h = 400, 340
+        w, h = 520, 732
         sx = root.winfo_x() + (root.winfo_width() - w) // 2
         sy = root.winfo_y() + (root.winfo_height() - h) // 2
         win.geometry(f"{w}x{h}+{sx}+{sy}")
@@ -1209,31 +1213,58 @@ def main():
         win.resizable(False, False)
 
         tk.Label(win, text="Luanti VHR Nodebox & Texture Editor", bg="#2a2a2a", fg="#cccccc",
-                 font=("TkDefaultFont", 12, "bold")).pack(pady=(15, 4))
-        tk.Label(win, text="Version 0.6.0",
-                 bg="#2a2a2a", fg="#999999", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
+                 font=("TkDefaultFont", 13, "bold")).pack(pady=(18, 3))
         tk.Label(win, text="Visual Hull Reconstruction Nodebox & Texture Editor",
-                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9)).pack(pady=(0, 4))
-        tk.Label(win, text="by Zenon Seth", bg="#2a2a2a", fg="#ccff00",
-                 font=("TkDefaultFont", 10)).pack(pady=(0, 10))
+                 bg="#2a2a2a", fg="#888888", font=("TkDefaultFont", 9)).pack()
+        tk.Label(win, text="Version 0.6.0   -   by Zenon Seth",
+                 bg="#2a2a2a", fg="#ccff00", font=("TkDefaultFont", 10)).pack(pady=(4, 14))
 
-        help_text = (
-            "Layers:\n"
-            "  Each layer has a visibility checkbox.\n"
-            "  Only visible layers are shown in the preview\n"
-            "  and included in export. The top layer's color\n"
-            "  takes priority where layers overlap."
-        )
-        tk.Label(win, text=help_text, bg="#2a2a2a", fg="#cccccc",
-                 font=("TkDefaultFont", 9), justify=tk.LEFT, anchor="w").pack(
-                     padx=20, pady=(0, 10), fill=tk.X)
+        def section(title, lines, title_color="#88bbff"):
+            f = tk.Frame(win, bg="#2a2a2a")
+            f.pack(fill=tk.X, padx=24, pady=(0, 10))
+            tk.Label(f, text=title, bg="#2a2a2a", fg=title_color,
+                     font=("TkDefaultFont", 10, "bold"), anchor="w").pack(fill=tk.X)
+            for line in lines:
+                tk.Label(f, text=line, bg="#2a2a2a", fg="#cccccc",
+                         font=("TkDefaultFont", 10), justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=8)
 
-        tk.Button(win, text="Close", width=8, command=win.destroy).pack()
+        section("How it works", [
+            "Draw on the Top, Front and Left views to define the 3D shape.",
+            "The editor uses Visual Hull Reconstruction to convert your",
+            "three 2D drawings into a set of nodebox cuboids.",
+        ])
+
+        section("● Primary views  (geometry + texture)", [
+            "Top, Front and Left are the primary sides. The geometry",
+            "(nodebox shape) is derived from these three views only.",
+            "They are marked ● in blue when active.",
+        ])
+
+        section("Opposite sides  (texture only)", [
+            "Each view can be toggled to its opposite face: Bottom, Back,",
+            "or Right. These sides are texture-only - they let you paint",
+            "a different texture for that face without affecting the shape.",
+            "Use 'Switch to ...' in each view panel to toggle.",
+        ])
+
+        section("Layers", [
+            "Each layer has a visibility toggle. Only visible layers appear",
+            "in the preview and are included in export. Where layers overlap,",
+            "the topmost visible layer's color takes priority for determining color.",
+        ])
+
+        section("Controls", [
+            "LMB / drag: Draw  |  RMB / drag: Erase",
+            "Alt+LMB: Pick color  |  Ctrl+Z / Y: Undo / Redo",
+            "Y: Pencil tool  |  F: Fill tool  |  S: Cycle symmetry",
+        ])
+
+        tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(4, 16))
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
 
-    about_btn = tk.Button(export_frame, text="Help/About", width=8, command=do_about)
+    about_btn = tk.Button(export_frame, text="Help / About", width=12, font=("TkDefaultFont", 10, "bold"), fg="#1a4d7a", command=do_about)
     about_btn.pack(side=tk.LEFT, padx=5)
 
     def on_resize(event):
