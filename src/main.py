@@ -96,6 +96,10 @@ ZOOM_LEVELS = {
 
 grids = {"top": {}, "front": {}, "side": {}}
 canvas_to_name = {}
+view_reverse = {"top": False, "front": False, "side": False}
+REVERSE_VIEW = {"top": "bottom", "front": "back", "side": "right"}
+REVERSE_LABELS = {"top": "Bottom", "front": "Back", "side": "Right"}
+PRIMARY_LABELS = {"top": "Top", "front": "Front", "side": "Left"}
 dirty = False
 last_saved_state = None
 
@@ -162,9 +166,15 @@ def draw_grid(canvas):
         "front": ("-X", "+X", "+Y", "-Y"),
         "side":  ("-Z", "+Z", "+Y", "-Y"),
     }
+    VIEW_LABELS_REVERSE = {
+        "top":   ("+X", "-X", "-Z", "+Z"),
+        "front": ("+X", "-X", "+Y", "-Y"),
+        "side":  ("+Z", "-Z", "+Y", "-Y"),
+    }
     name = canvas_to_name.get(canvas)
     if name and name in VIEW_LABELS:
-        lbl_left, lbl_right, lbl_top, lbl_bottom = VIEW_LABELS[name]
+        labels = VIEW_LABELS_REVERSE if view_reverse.get(name) else VIEW_LABELS
+        lbl_left, lbl_right, lbl_top, lbl_bottom = labels[name]
         mid = offset_x + size / 2
         midy = offset_y + size / 2
         margin = 4
@@ -172,7 +182,7 @@ def draw_grid(canvas):
                            fill="#999999", font=("TkDefaultFont", 9), anchor="w")
         canvas.create_text(offset_x + size - margin, midy, text=lbl_right,
                            fill="#999999", font=("TkDefaultFont", 9), anchor="e")
-        canvas.create_text(mid, offset_y + margin + 14, text=lbl_top,
+        canvas.create_text(mid, offset_y + margin, text=lbl_top,
                            fill="#999999", font=("TkDefaultFont", 9), anchor="n")
         canvas.create_text(mid, offset_y + size - margin, text=lbl_bottom,
                            fill="#999999", font=("TkDefaultFont", 9), anchor="s")
@@ -345,29 +355,118 @@ def main():
     content.rowconfigure(0, weight=1, uniform="row")
     content.rowconfigure(1, weight=1, uniform="row")
 
-    top_frame = tk.Frame(content, bg="#2a2a2a")
-    top_frame.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-    tk.Label(top_frame, text="Top", bg="#2a2a2a", fg="#999999",
-             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
-    top_view = tk.Canvas(top_frame, bg="#2a2a2a", highlightthickness=0)
-    top_view.place(relx=0.5, rely=0.5, anchor="center")
+    view_title_labels = {}
+    view_toggle_buttons = {}
+    view_copy_buttons = {}
+    view_cross_copy_buttons = {}
+
+    name_to_canvas = {}
+
+    COPYABLE_VIEWS = {"top", "front", "side"}
+
+    CROSS_COPY = {
+        "front": {False: ("side", "Left"), True: ("right", "Right")},
+        "side":  {False: ("front", "Front"), True: ("back", "Back")},
+    }
+
+    def copy_from_other(view_name):
+        primary_key = view_name
+        reverse_key = REVERSE_VIEW[view_name]
+        layer = layers[_active_layer_idx]
+        undo_push()
+        if view_reverse[view_name]:
+            layer[reverse_key] = dict(layer[primary_key])
+            grids[view_name] = layer[reverse_key]
+        else:
+            layer[primary_key] = dict(layer[reverse_key])
+            grids[view_name] = layer[primary_key]
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
+    def cross_copy(view_name):
+        is_rev = view_reverse[view_name]
+        source_key, _ = CROSS_COPY[view_name][is_rev]
+        layer = layers[_active_layer_idx]
+        dest_key = _grid_key(view_name)
+        undo_push()
+        layer[dest_key] = dict(layer.get(source_key, {}))
+        grids[view_name] = layer[dest_key]
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
+    def _update_copy_button(view_name):
+        is_rev = view_reverse[view_name]
+        if view_name in COPYABLE_VIEWS:
+            other_label = PRIMARY_LABELS[view_name] if is_rev else REVERSE_LABELS[view_name]
+            view_copy_buttons[view_name].configure(text=f"Copy from {other_label}")
+            view_copy_buttons[view_name].place(x=4, y=62, anchor="nw")
+        elif is_rev:
+            view_copy_buttons[view_name].configure(text=f"Copy from {PRIMARY_LABELS[view_name]}")
+            view_copy_buttons[view_name].place(x=4, y=62, anchor="nw")
+        else:
+            view_copy_buttons[view_name].place_forget()
+        if view_name in CROSS_COPY:
+            _, source_label = CROSS_COPY[view_name][is_rev]
+            view_cross_copy_buttons[view_name].configure(text=f"Copy from {source_label}")
+            view_cross_copy_buttons[view_name].place(x=4, y=90, anchor="nw")
+
+    def toggle_reverse(view_name):
+        view_reverse[view_name] = not view_reverse[view_name]
+        grids[view_name] = layers[_active_layer_idx][_grid_key(view_name)]
+        is_rev = view_reverse[view_name]
+        view_title_labels[view_name].configure(
+            text=REVERSE_LABELS[view_name] if is_rev else PRIMARY_LABELS[view_name])
+        view_toggle_buttons[view_name].configure(
+            text=f"Switch to {PRIMARY_LABELS[view_name]}" if is_rev else f"Switch to {REVERSE_LABELS[view_name]}")
+        _update_copy_button(view_name)
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
+    def _make_view_frame(parent, row, col, view_name, label_text):
+        frame = tk.Frame(parent, bg="#2a2a2a")
+        frame.grid(row=row, column=col, sticky="nsew", padx=1, pady=1)
+        lbl = tk.Label(frame, text=label_text, bg="#2a2a2a", fg="#999999",
+                       font=("TkDefaultFont", 11, "bold"))
+        lbl.place(x=4, y=4, anchor="nw")
+        view_title_labels[view_name] = lbl
+        btn = tk.Button(frame, text=f"Switch to {REVERSE_LABELS[view_name]}",
+                        bg="#3a3a3a", fg="#bbbbbb",
+                        font=("TkDefaultFont", 9), relief=tk.FLAT,
+                        padx=4, pady=0,
+                        command=lambda: toggle_reverse(view_name))
+        btn.place(x=4, y=34, anchor="nw")
+        view_toggle_buttons[view_name] = btn
+        copy_btn = tk.Button(frame, text=f"Copy from {REVERSE_LABELS[view_name]}",
+                             bg="#3a3a3a", fg="#bbbbbb",
+                             font=("TkDefaultFont", 9), relief=tk.FLAT,
+                             padx=4, pady=0,
+                             command=lambda: copy_from_other(view_name))
+        view_copy_buttons[view_name] = copy_btn
+        if view_name in COPYABLE_VIEWS:
+            copy_btn.place(x=4, y=62, anchor="nw")
+        if view_name in CROSS_COPY:
+            _, initial_label = CROSS_COPY[view_name][False]
+            cross_btn = tk.Button(frame, text=f"Copy from {initial_label}",
+                                  bg="#3a3a3a", fg="#bbbbbb",
+                                  font=("TkDefaultFont", 9), relief=tk.FLAT,
+                                  padx=4, pady=0,
+                                  command=lambda: cross_copy(view_name))
+            cross_btn.place(x=4, y=90, anchor="nw")
+            view_cross_copy_buttons[view_name] = cross_btn
+        canvas = tk.Canvas(frame, bg="#2a2a2a", highlightthickness=0)
+        canvas.place(relx=0.55, rely=0.5, anchor="center")
+        name_to_canvas[view_name] = canvas
+        return frame, canvas
+
+    top_frame, top_view = _make_view_frame(content, 0, 1, "top", "Top")
 
     preview_3d = tk.Canvas(content, bg="#1a1a1a", highlightthickness=0)
     preview_3d.grid(row=0, column=2, sticky="nsew", padx=1, pady=1)
 
-    front_frame = tk.Frame(content, bg="#2a2a2a")
-    front_frame.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
-    tk.Label(front_frame, text="Front", bg="#2a2a2a", fg="#999999",
-             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
-    front_view = tk.Canvas(front_frame, bg="#2a2a2a", highlightthickness=0)
-    front_view.place(relx=0.5, rely=0.5, anchor="center")
-
-    side_frame = tk.Frame(content, bg="#2a2a2a")
-    side_frame.grid(row=1, column=2, sticky="nsew", padx=1, pady=1)
-    tk.Label(side_frame, text="Side", bg="#2a2a2a", fg="#999999",
-             font=("TkDefaultFont", 11, "bold")).place(x=4, y=4, anchor="nw")
-    side_view = tk.Canvas(side_frame, bg="#2a2a2a", highlightthickness=0)
-    side_view.place(relx=0.5, rely=0.5, anchor="center")
+    front_frame, front_view = _make_view_frame(content, 1, 1, "front", "Front")
+    side_frame, side_view = _make_view_frame(content, 1, 2, "side", "Left")
 
     def on_view_frame_resize(event):
         frame = event.widget
@@ -577,7 +676,8 @@ def main():
 
     global _layers, _active_layer_idx
     layers = [{"name": "Top Layer", "visible": True,
-               "top": grids["top"], "front": grids["front"], "side": grids["side"]}]
+               "top": grids["top"], "front": grids["front"], "side": grids["side"],
+               "bottom": {}, "back": {}, "right": {}}]
     _layers = layers
     _active_layer_idx = 0
     layer_widgets = []
@@ -607,14 +707,18 @@ def main():
         mark_dirty()
         update_preview()
 
+    def _grid_key(view_name):
+        if view_reverse[view_name]:
+            return REVERSE_VIEW[view_name]
+        return view_name
+
     def select_layer(idx):
         global _active_layer_idx
         if idx < 0 or idx >= len(layers):
             return
         _active_layer_idx = idx
-        grids["top"] = layers[idx]["top"]
-        grids["front"] = layers[idx]["front"]
-        grids["side"] = layers[idx]["side"]
+        for view_name in ("top", "front", "side"):
+            grids[view_name] = layers[idx][_grid_key(view_name)]
         refresh_layer_list()
         for view in grid_views:
             draw_grid(view)
@@ -622,7 +726,9 @@ def main():
 
     def do_new_layer():
         idx = len(layers) + 1
-        layers.append({"name": f"Layer {idx}", "visible": True, "top": {}, "front": {}, "side": {}})
+        layers.append({"name": f"Layer {idx}", "visible": True,
+                        "top": {}, "front": {}, "side": {},
+                        "bottom": {}, "back": {}, "right": {}})
         select_layer(len(layers) - 1)
         mark_dirty()
 
@@ -634,6 +740,9 @@ def main():
             "top": dict(src["top"]),
             "front": dict(src["front"]),
             "side": dict(src["side"]),
+            "bottom": dict(src.get("bottom", {})),
+            "back": dict(src.get("back", {})),
+            "right": dict(src.get("right", {})),
         })
         select_layer(len(layers) - 1)
         mark_dirty()
@@ -687,7 +796,8 @@ def main():
             return
         global dirty
         layers.clear()
-        layers.append({"name": "Top Layer", "top": {}, "front": {}, "side": {}})
+        layers.append({"name": "Top Layer", "top": {}, "front": {}, "side": {},
+                        "bottom": {}, "back": {}, "right": {}})
         select_layer(0)
         dirty = False
         undo.clear()
@@ -716,6 +826,10 @@ def main():
                 json_str = f.read()
             loaded = load_nbx(json_str)
             loaded[0]["name"] = "Top Layer"
+            for layer in loaded:
+                layer.setdefault("bottom", {})
+                layer.setdefault("back", {})
+                layer.setdefault("right", {})
             layers.clear()
             layers.extend(loaded)
             select_layer(0)
@@ -754,7 +868,7 @@ def main():
         lua_code, method, count = grids_to_lua_layers(_visible_layers())
         win = tk.Toplevel(root)
         win.title("Export")
-        ew, eh = 540, 780
+        ew, eh = 540, 960
         sx = root.winfo_x() + (root.winfo_width() - ew) // 2
         sy = root.winfo_y() + (root.winfo_height() - eh) // 2
         win.geometry(f"{ew}x{eh}+{sx}+{sy}")
@@ -765,11 +879,17 @@ def main():
         tex_frame = tk.Frame(win, bg="#2a2a2a")
         tex_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
 
+        EXPORT_NAMES = {
+            "top": "top", "front": "front", "side": "left",
+            "bottom": "bottom", "back": "back", "right": "right",
+        }
+
         def do_export_png(view_name):
+            filename = EXPORT_NAMES[view_name]
             path = filedialog.asksaveasfilename(
                 defaultextension=".png",
                 filetypes=[("PNG files", "*.png")],
-                initialfile=f"{view_name}.png",
+                initialfile=f"{filename}.png",
                 parent=win,
             )
             if path:
@@ -779,7 +899,7 @@ def main():
         for view_name in ("top", "front", "side"):
             col_frame = tk.Frame(tex_frame, bg="#2a2a2a")
             col_frame.pack(side=tk.LEFT, padx=5)
-            tk.Label(col_frame, text=view_name.capitalize(), bg="#2a2a2a",
+            tk.Label(col_frame, text=PRIMARY_LABELS.get(view_name, view_name.capitalize()), bg="#2a2a2a",
                      fg="#999999", font=("TkDefaultFont", 9)).pack()
             c = tk.Canvas(col_frame, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
                           bg="#1a1a1a", highlightthickness=1,
@@ -789,6 +909,34 @@ def main():
             _draw_texture_preview(c, _composite_view(view_name))
             tk.Button(col_frame, text="Export PNG", width=12,
                       command=lambda v=view_name: do_export_png(v)).pack(pady=(4, 0))
+
+        REVERSE_EXPORT = [
+            ("bottom", "top", "Bottom", "Top"),
+            ("back", "front", "Back", "Front"),
+            ("right", "side", "Right", "Left"),
+        ]
+        rev_frame = tk.Frame(win, bg="#2a2a2a")
+        rev_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
+        for rev_key, pri_key, rev_label, pri_label in REVERSE_EXPORT:
+            col_frame = tk.Frame(rev_frame, bg="#2a2a2a")
+            col_frame.pack(side=tk.LEFT, padx=5)
+            tk.Label(col_frame, text=rev_label, bg="#2a2a2a",
+                     fg="#999999", font=("TkDefaultFont", 9)).pack()
+            rev_composite = _composite_view(rev_key)
+            pri_composite = _composite_view(pri_key)
+            has_unique = bool(rev_composite) and rev_composite != pri_composite
+            c = tk.Canvas(col_frame, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
+                          bg="#1a1a1a", highlightthickness=1,
+                          highlightbackground="#444444")
+            c.pack()
+            if has_unique:
+                _draw_texture_preview(c, rev_composite)
+                tk.Button(col_frame, text="Export PNG", width=12,
+                          command=lambda v=rev_key: do_export_png(v)).pack(pady=(4, 0))
+            else:
+                c.create_text(PREVIEW_SIZE // 2, PREVIEW_SIZE // 2,
+                              text=f"uses {pri_label}", fill="#666666",
+                              font=("TkDefaultFont", 10))
 
         btn_bar = tk.Frame(win, bg="#2a2a2a", height=40)
         btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 10))
@@ -800,14 +948,23 @@ def main():
                                   font=("TkDefaultFont", 9))
             info_label.pack(side=tk.BOTTOM, pady=(0, 2))
 
+        has_bottom = bool(_composite_view("bottom")) and _composite_view("bottom") != _composite_view("top")
+        has_back = bool(_composite_view("back")) and _composite_view("back") != _composite_view("front")
+        has_right = bool(_composite_view("right")) and _composite_view("right") != _composite_view("side")
+        top_name = "NODENAME_top.png"
+        bottom_name = "NODENAME_bottom.png" if has_bottom else top_name
+        left_name = "NODENAME_left.png"
+        right_name = "NODENAME_right.png" if has_right else left_name
+        front_name = "NODENAME_front.png"
+        back_name = "NODENAME_back.png" if has_back else front_name
         TILES_DEF = (
             'tiles = {\n'
-            '    "TOP_TEXTURE_NAME.png",\n'
-            '    "TOP_TEXTURE_NAME.png",\n'
-            '    "SIDE_TEXTURE_NAME.png",\n'
-            '    "SIDE_TEXTURE_NAME.png",\n'
-            '    "FRONT_TEXTURE_NAME.png",\n'
-            '    "FRONT_TEXTURE_NAME.png",\n'
+            f'    "{top_name}",\n'
+            f'    "{bottom_name}",\n'
+            f'    "{left_name}",\n'
+            f'    "{right_name}",\n'
+            f'    "{front_name}",\n'
+            f'    "{back_name}",\n'
             '},\n'
         )
 

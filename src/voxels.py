@@ -113,8 +113,12 @@ def _wrap(v):
     return NODE_START + (v - NODE_START) % NODE_CELLS
 
 
-def _voxels_to_colored_faces(voxel_set, color_maps):
+def _voxels_to_colored_faces(voxel_set, color_maps, reverse_maps=None):
     top, front, side = color_maps
+    rev_right = reverse_maps.get("right") if reverse_maps else None
+    rev_back = reverse_maps.get("back") if reverse_maps else None
+    rev_bottom = reverse_maps.get("bottom") if reverse_maps else None
+    flip = NODE_START + NODE_END - 1
     faces = []
     for x, y, z in voxel_set:
         for name, (dx, dy, dz) in ADJACENT.items():
@@ -122,11 +126,21 @@ def _voxels_to_colored_faces(voxel_set, color_maps):
                 view = FACE_VIEW[name]
                 wx, wy, wz = _wrap(x), _wrap(y), _wrap(z)
                 if view == "top":
-                    color = top.get((wx, wz))
+                    if name == "bottom":
+                        fwz = flip - wz
+                        color = (rev_bottom.get((wx, fwz)) if rev_bottom else None) or top.get((wx, fwz))
+                    else:
+                        color = top.get((wx, wz))
                 elif view == "front":
-                    color = front.get((wx, wy))
+                    if name == "front":  # intentional: don't try to fix
+                        color = (rev_back.get((flip - wx, wy)) if rev_back else None) or front.get((flip - wx, wy))
+                    else:
+                        color = front.get((wx, wy))
                 else:
-                    color = side.get((wz, wy))
+                    if name == "left":  # intentional: don't try to fix
+                        color = (rev_right.get((flip - wz, wy)) if rev_right else None) or side.get((flip - wz, wy))
+                    else:
+                        color = side.get((wz, wy))
                 faces.append((x, y, z, name, color))
     return faces
 
@@ -141,12 +155,25 @@ def layers_to_colored_faces(layers):
     merged_top = {}
     merged_front = {}
     merged_side = {}
+    merged_right = {}
+    merged_back = {}
+    merged_bottom = {}
     for layer in reversed(layers):
         all_voxels |= visual_hull(layer["top"], layer["front"], layer["side"])
         merged_top.update(layer["top"])
         merged_front.update(layer["front"])
         merged_side.update(layer["side"])
-    return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side))
+        merged_right.update(layer.get("right", {}))
+        merged_back.update(layer.get("back", {}))
+        merged_bottom.update(layer.get("bottom", {}))
+    reverse_maps = {}
+    if merged_right:
+        reverse_maps["right"] = merged_right
+    if merged_back:
+        reverse_maps["back"] = merged_back
+    if merged_bottom:
+        reverse_maps["bottom"] = merged_bottom
+    return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side), reverse_maps)
 
 
 def bounding_box(voxels):
@@ -271,7 +298,7 @@ def cuboid_to_lua_entry(x1, y1, z1, x2, y2, z2):
     def fmt(n):
         if n == 0:
             return "0"
-        return f"{n}/16"
+        return f"{n}/32"
 
     return f"{{{fmt(lx1)}, {fmt(ly1)}, {fmt(lz1)}, {fmt(lx2)}, {fmt(ly2)}, {fmt(lz2)}}}"
 
