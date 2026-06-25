@@ -221,8 +221,13 @@ def _greedy_2d(cells):
 def _merge_slices(slices_by_coord):
     cuboids = []
     active = {}
+    prev_coord = None
     for coord in sorted(slices_by_coord):
         rects = set(slices_by_coord[coord])
+        if prev_coord is not None and coord != prev_coord + 1:
+            for rect, start in active.items():
+                cuboids.append((rect, start, prev_coord))
+            active = {}
         next_active = {}
         for rect in rects:
             if rect in active:
@@ -233,8 +238,9 @@ def _merge_slices(slices_by_coord):
             if rect not in rects:
                 cuboids.append((rect, start, coord - 1))
         active = next_active
+        prev_coord = coord
     for rect, start in active.items():
-        cuboids.append((rect, start, max(slices_by_coord)))
+        cuboids.append((rect, start, prev_coord))
     return cuboids
 
 
