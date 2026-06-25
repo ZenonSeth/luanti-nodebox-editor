@@ -57,7 +57,7 @@ def _project(x, y, z, cx, cy, cz, cos_az, sin_az, cos_el, sin_el, scale, screen_
     sx = screen_cx + rx * scale * persp
     sy = screen_cy + ry * scale * persp
 
-    return sx, sy, depth
+    return sx, sy
 
 
 def render_preview(canvas, faces, azimuth=None, elevation=None):
@@ -83,7 +83,7 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
     screen_cx = w / 2
     screen_cy = h / 2
 
-    view_vec = (-sin_az * cos_el, sin_el, cos_az * cos_el)
+    vx, vy, vz = -sin_az * cos_el, sin_el, cos_az * cos_el
 
     def project(x, y, z):
         return _project(x, y, z, cx, cy, cz, cos_az, sin_az, cos_el, sin_el, scale, screen_cx, screen_cy)
@@ -108,42 +108,47 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
             fill=REF_CUBE_COLOR, dash=(3, 3)
         )
 
-    # Backface cull and project
-    visible = []
-    dr, dg, db = BASE_COLOR
-    vx, vy, vz = view_vec
+    if not faces:
+        return
 
+    # Group faces by voxel position
+    voxel_faces = {}
     for face in faces:
         if len(face) == 5:
             fx, fy, fz, name, color = face
         else:
             fx, fy, fz, name = face
             color = None
+        key = (fx, fy, fz)
+        if key not in voxel_faces:
+            voxel_faces[key] = []
+        voxel_faces[key].append((name, color))
 
-        nx, ny, nz = FACE_NORMALS[name]
-        dot = nx * vx + ny * vy + nz * vz
-        if dot >= 0:
-            continue
+    # Sort voxels by depth key (integer positions, back-to-front = decreasing depth)
+    # depth(x,y,z) = vx*x + vy*y + vz*z  (linear, so voxel position is sufficient)
+    sorted_voxels = sorted(voxel_faces, key=lambda p: -(vx * p[0] + vy * p[1] + vz * p[2]))
 
-        verts = FACE_VERTS[name](fx, fy, fz)
-        proj_verts = [project(*v) for v in verts]
-        center_depth = sum(p[2] for p in proj_verts) / 4
+    dr, dg, db = BASE_COLOR
 
-        shade = FACE_SHADING[name]
-        if color:
-            r = int(color[1:3], 16)
-            g = int(color[3:5], 16)
-            b = int(color[5:7], 16)
-            fill = _shade_color(r, g, b, shade)
-        else:
-            fill = _shade_color(dr, dg, db, shade)
+    for (fx, fy, fz) in sorted_voxels:
+        for name, color in voxel_faces[(fx, fy, fz)]:
+            nx, ny, nz = FACE_NORMALS[name]
+            if nx * vx + ny * vy + nz * vz >= 0:
+                continue
 
-        visible.append((center_depth, proj_verts, fill))
+            verts = FACE_VERTS[name](fx, fy, fz)
+            proj_verts = [project(*v) for v in verts]
 
-    visible.sort(key=lambda f: -f[0])
+            shade = FACE_SHADING[name]
+            if color:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                fill = _shade_color(r, g, b, shade)
+            else:
+                fill = _shade_color(dr, dg, db, shade)
 
-    for depth, proj_verts, fill in visible:
-        coords = []
-        for sx, sy, _ in proj_verts:
-            coords.extend([sx, sy])
-        canvas.create_polygon(coords, fill=fill, outline="")
+            coords = []
+            for sx, sy in proj_verts:
+                coords.extend([sx, sy])
+            canvas.create_polygon(coords, fill=fill, outline="")

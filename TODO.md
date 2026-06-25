@@ -31,6 +31,6 @@
 
 - [x] Import PNG texture: load a 32x32 PNG into any of the three 2D views,
       mapping pixel colors to grid cells (fills the node region only)
-- [ ] 3D preview: scanline back-to-front rendering optimization
+- [x] 3D preview: scanline back-to-front rendering optimization
 - [x] 3D preview: use per-cell colors from grids instead of flat shading
       (each face's color comes from the corresponding view's grid cell)
