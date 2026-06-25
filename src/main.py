@@ -1,5 +1,7 @@
+import colorsys
 import json
 import os
+import random
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -8,6 +10,7 @@ from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_t
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
+from help import show_help
 import undo
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
@@ -128,6 +131,9 @@ PRIMARY_LABELS = {"top": "Top", "front": "Front", "side": "Left"}
 dirty = False
 last_saved_state = None
 _pixel_clipboard = None
+noise_enabled = False
+noise_amount = 0.1
+_last_drag_cell = None
 
 def undo_push():
     undo.push(_layers, _active_layer_idx)
@@ -278,6 +284,14 @@ def set_color(color):
     save_settings(settings)
 
 
+def _apply_noise(hex_color):
+    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    l = max(0.0, min(1.0, l + random.uniform(-noise_amount, noise_amount)))
+    nr, ng, nb = colorsys.hls_to_rgb(h, l, s)
+    return f"#{int(nr * 255):02x}{int(ng * 255):02x}{int(nb * 255):02x}"
+
+
 def _resolve_fill_color(view_name, col, row):
     if not (NODE_START <= col < NODE_END and NODE_START <= row < NODE_END):
         return "#000000"
@@ -349,6 +363,8 @@ def _symmetry_cells(col, row):
 
 
 def on_click(event, mode="draw"):
+    global _last_drag_cell
+    _last_drag_cell = None
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
@@ -361,7 +377,8 @@ def on_click(event, mode="draw"):
             flood_fill(grid, view_name, col, row)
         else:
             for c, r in _symmetry_cells(col, row):
-                grid[(c, r)] = _resolve_fill_color(view_name, c, r)
+                color = _resolve_fill_color(view_name, c, r)
+                grid[(c, r)] = _apply_noise(color) if noise_enabled else color
     else:
         if current_tool == "fill":
             flood_fill(grid, view_name, col, row, erase=True)
@@ -374,19 +391,25 @@ def on_click(event, mode="draw"):
 
 
 def on_drag(event, mode="draw"):
+    global _last_drag_cell
     if current_tool == "fill":
         return
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
+    if (col, row) == _last_drag_cell:
+        return
+    _last_drag_cell = (col, row)
     view_name = canvas_to_name[canvas]
     grid = grids[view_name]
     changed = False
     if mode == "draw":
         for c, r in _symmetry_cells(col, row):
             color = _resolve_fill_color(view_name, c, r)
-            if (c, r) not in grid or grid[(c, r)] != color:
+            if noise_enabled:
+                color = _apply_noise(color)
+            if noise_enabled or (c, r) not in grid or grid[(c, r)] != color:
                 grid[(c, r)] = color
                 changed = True
     else:
@@ -585,7 +608,7 @@ def main():
     tool_label = tk.Label(left_panel, text="Tool", bg="#333333", fg="#cccccc")
     tool_label.pack(pady=(15, 5))
 
-    tool_section = tk.Frame(left_panel, bg="#333333", height=58)
+    tool_section = tk.Frame(left_panel, bg="#333333", height=68)
     tool_section.pack_propagate(False)
     tool_section.pack(fill=tk.X)
 
@@ -609,6 +632,37 @@ def main():
     symmetry_menu["menu"].configure(bg="#444444", fg="#cccccc")
     symmetry_menu.pack(side=tk.LEFT)
     add_tooltip(symmetry_menu, "Cycle symmetry (S)")
+
+    tk.Label(symmetry_frame, text="|", bg="#333333", fg="#555555").pack(side=tk.LEFT, padx=6)
+
+    noise_var = tk.BooleanVar(value=False)
+    noise_slider_var = tk.IntVar(value=10)
+
+    noise_slider = tk.Scale(symmetry_frame, from_=1, to=30, orient=tk.HORIZONTAL,
+                            variable=noise_slider_var, length=70, showvalue=False,
+                            bg="#333333", fg="#cccccc", troughcolor="#444444",
+                            highlightthickness=0, bd=0)
+
+    def on_noise_slider(*_):
+        global noise_amount
+        noise_amount = noise_slider_var.get() / 100.0
+
+    noise_slider.configure(command=on_noise_slider)
+
+    def on_noise_toggle(*_):
+        global noise_enabled
+        noise_enabled = noise_var.get()
+        if noise_enabled:
+            noise_slider.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            noise_slider.pack_forget()
+
+    noise_check = tk.Checkbutton(symmetry_frame, text="Noise", variable=noise_var,
+                                 bg="#333333", fg="#cccccc", selectcolor="#444444",
+                                 activebackground="#333333", activeforeground="#cccccc",
+                                 command=on_noise_toggle)
+    noise_check.pack(side=tk.LEFT)
+    add_tooltip(noise_check, "Apply random lightness jitter per pixel while drawing")
 
     def set_tool(tool):
         global current_tool
@@ -1181,75 +1235,7 @@ def main():
     controls_label.pack(side=tk.BOTTOM, padx=5, pady=(0, 5), fill=tk.X)
 
     def do_about():
-        win = tk.Toplevel(root)
-        win.title("Help / About")
-        w, h = 520, 732
-        sx = root.winfo_x() + (root.winfo_width() - w) // 2
-        sy = root.winfo_y() + (root.winfo_height() - h) // 2
-        win.geometry(f"{w}x{h}+{sx}+{sy}")
-        win.configure(bg="#2a2a2a")
-        win.transient(root)
-        win.grab_set()
-        win.resizable(False, False)
-
-        tk.Label(win, text="Luanti VHR Nodebox & Texture Editor", bg="#2a2a2a", fg="#cccccc",
-                 font=("TkDefaultFont", 13, "bold")).pack(pady=(18, 3))
-        tk.Label(win, text="Visual Hull Reconstruction Nodebox & Texture Editor",
-                 bg="#2a2a2a", fg="#888888", font=("TkDefaultFont", 9)).pack()
-        tk.Label(win, text="Version 0.6.0   -   by Zenon Seth",
-                 bg="#2a2a2a", fg="#ccff00", font=("TkDefaultFont", 10)).pack(pady=(4, 14))
-
-        def section(title, lines, title_color="#88bbff"):
-            f = tk.Frame(win, bg="#2a2a2a")
-            f.pack(fill=tk.X, padx=24, pady=(0, 10))
-            tk.Label(f, text=title, bg="#2a2a2a", fg=title_color,
-                     font=("TkDefaultFont", 10, "bold"), anchor="w").pack(fill=tk.X)
-            for line in lines:
-                tk.Label(f, text=line, bg="#2a2a2a", fg="#cccccc",
-                         font=("TkDefaultFont", 10), justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=8)
-
-        section("How it works", [
-            "Draw on the Top, Front and Left views to define the 3D shape.",
-            "The editor uses Visual Hull Reconstruction to convert your",
-            "three 2D drawings into a set of nodebox cuboids.",
-        ])
-
-        section("● Primary views  (geometry + texture)", [
-            "Top, Front and Left are the primary sides. The geometry",
-            "(nodebox shape) is derived from these three views only.",
-            "They are marked ● in blue when active.",
-        ])
-
-        section("Opposite sides  (texture only)", [
-            "Each view can be toggled to its opposite face: Bottom, Back,",
-            "or Right. These sides are texture-only - they let you paint",
-            "a different texture for that face without affecting the shape.",
-            "Use 'Switch to ...' in each view panel to toggle.",
-        ])
-
-        section("Layers", [
-            "Each layer has a visibility toggle. Only visible layers appear",
-            "in the preview and are included in export. Where layers overlap,",
-            "the topmost visible layer's color takes priority for determining color.",
-        ])
-
-        section("Controls", [
-            "LMB / drag: Draw  |  RMB / drag: Erase",
-            "Alt+LMB: Pick color  |  Ctrl+Z / Y: Undo / Redo",
-            "Y: Pencil tool  |  F: Fill tool  |  S: Cycle symmetry",
-        ])
-
-        use_system_var = tk.BooleanVar(value=settings.get("use_system_colorpicker", False))
-        def on_toggle_colorpicker():
-            settings["use_system_colorpicker"] = use_system_var.get()
-            save_settings(settings)
-        tk.Checkbutton(win, text="Use system color picker",
-                       variable=use_system_var, command=on_toggle_colorpicker,
-                       bg="#2a2a2a", fg="#cccccc", selectcolor="#1a1a1a",
-                       activebackground="#2a2a2a", activeforeground="#cccccc",
-                       font=("TkDefaultFont", 10)).pack(pady=(8, 0))
-
-        tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(8, 16))
+        show_help(root, settings, save_settings)
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
