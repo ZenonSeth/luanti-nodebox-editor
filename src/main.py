@@ -11,6 +11,28 @@ import undo
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
 
+
+def add_tooltip(widget, text):
+    tip = None
+
+    def show(event):
+        nonlocal tip
+        tip = tk.Toplevel(widget)
+        tip.wm_overrideredirect(True)
+        tip.wm_geometry(f"+{event.x_root + 12}+{event.y_root + 16}")
+        tk.Label(tip, text=text, bg="#ffffe0", fg="#000000",
+                 relief=tk.SOLID, borderwidth=1,
+                 font=("TkDefaultFont", 9), padx=4, pady=2).pack()
+
+    def hide(event):
+        nonlocal tip
+        if tip:
+            tip.destroy()
+            tip = None
+
+    widget.bind("<Enter>", show, add=True)
+    widget.bind("<Leave>", hide, add=True)
+
 DEFAULT_SETTINGS = {
     "zoom": "1x",
 }
@@ -86,7 +108,8 @@ def build_palette():
 selected_color = None
 color_indicator = None
 current_tool = "pencil"
-TOOL_CURSORS = {"pencil": "tcross", "fill": "target"}
+current_symmetry = "None"
+TOOL_CURSORS = {"pencil": "pencil", "fill": "target"}
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -194,6 +217,23 @@ preview_elevation = 25
 cached_faces = []
 _layers = None
 _active_layer_idx = 0
+hover_cell = (None, None, None)  # (canvas, col, row)
+
+
+def draw_hover(canvas, col, row):
+    if current_tool != "pencil":
+        return
+    offset_x, offset_y, size, cell, view_start, view_end = get_grid_params(canvas)
+    for c, r in _symmetry_cells(col, row):
+        if view_start <= c < view_end and view_start <= r < view_end:
+            x1 = offset_x + (c - view_start) * cell
+            y1 = offset_y + (r - view_start) * cell
+            canvas.create_rectangle(x1, y1, x1 + cell, y1 + cell,
+                                    outline="#000000", fill="", width=2, tags="hover")
+
+
+def clear_hover(canvas):
+    canvas.delete("hover")
 
 
 def _visible_layers():
@@ -286,6 +326,18 @@ def flood_fill(grid, view_name, col, row, erase=False):
                 stack.append((nc, nr))
 
 
+def _symmetry_cells(col, row):
+    m = GRID_SIZE - 1 - col
+    n = GRID_SIZE - 1 - row
+    if current_symmetry == "Left/Right":
+        return [(col, row), (m, row)]
+    if current_symmetry == "Top/Bottom":
+        return [(col, row), (col, n)]
+    if current_symmetry == "Radial":
+        return [(col, row), (m, n)]
+    return [(col, row)]
+
+
 def on_click(event, mode="draw"):
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
@@ -298,12 +350,14 @@ def on_click(event, mode="draw"):
         if current_tool == "fill":
             flood_fill(grid, view_name, col, row)
         else:
-            grid[(col, row)] = _resolve_fill_color(view_name, col, row)
+            for c, r in _symmetry_cells(col, row):
+                grid[(c, r)] = _resolve_fill_color(view_name, c, r)
     else:
         if current_tool == "fill":
             flood_fill(grid, view_name, col, row, erase=True)
         else:
-            grid.pop((col, row), None)
+            for c, r in _symmetry_cells(col, row):
+                grid.pop((c, r), None)
     mark_dirty()
     draw_grid(canvas)
     update_preview()
@@ -318,19 +372,22 @@ def on_drag(event, mode="draw"):
         return
     view_name = canvas_to_name[canvas]
     grid = grids[view_name]
+    changed = False
     if mode == "draw":
-        color = _resolve_fill_color(view_name, col, row)
-        if (col, row) not in grid or grid[(col, row)] != color:
-            grid[(col, row)] = color
-            mark_dirty()
-            draw_grid(canvas)
-            update_preview()
+        for c, r in _symmetry_cells(col, row):
+            color = _resolve_fill_color(view_name, c, r)
+            if (c, r) not in grid or grid[(c, r)] != color:
+                grid[(c, r)] = color
+                changed = True
     else:
-        if (col, row) in grid:
-            grid.pop((col, row))
-            mark_dirty()
-            draw_grid(canvas)
-            update_preview()
+        for c, r in _symmetry_cells(col, row):
+            if (c, r) in grid:
+                grid.pop((c, r))
+                changed = True
+    if changed:
+        mark_dirty()
+        draw_grid(canvas)
+        update_preview()
 
 
 def main():
@@ -544,8 +601,30 @@ def main():
     tool_label = tk.Label(left_panel, text="Tool", bg="#333333", fg="#cccccc")
     tool_label.pack(pady=(15, 5))
 
-    tool_frame = tk.Frame(left_panel, bg="#333333")
-    tool_frame.pack(pady=5)
+    tool_section = tk.Frame(left_panel, bg="#333333", height=58)
+    tool_section.pack_propagate(False)
+    tool_section.pack(fill=tk.X)
+
+    tool_frame = tk.Frame(tool_section, bg="#333333")
+    tool_frame.pack(pady=(0, 2))
+
+    symmetry_frame = tk.Frame(tool_section, bg="#333333")
+    symmetry_frame.pack()
+
+    tk.Label(symmetry_frame, text="Symmetry:", bg="#333333", fg="#cccccc").pack(side=tk.LEFT, padx=(0, 4))
+
+    symmetry_var = tk.StringVar(value="None")
+
+    def on_symmetry_change(*_):
+        global current_symmetry
+        current_symmetry = symmetry_var.get()
+
+    symmetry_menu = tk.OptionMenu(symmetry_frame, symmetry_var, "None", "Left/Right", "Top/Bottom", "Radial", command=on_symmetry_change)
+    symmetry_menu.configure(bg="#444444", fg="#cccccc", activebackground="#555555",
+                            activeforeground="#ffffff", highlightthickness=0, width=9)
+    symmetry_menu["menu"].configure(bg="#444444", fg="#cccccc")
+    symmetry_menu.pack(side=tk.LEFT)
+    add_tooltip(symmetry_menu, "Cycle symmetry (S)")
 
     def set_tool(tool):
         global current_tool
@@ -555,17 +634,24 @@ def main():
         cursor = TOOL_CURSORS[tool]
         for view in grid_views:
             view.configure(cursor=cursor)
+        if tool == "pencil":
+            symmetry_frame.pack()
+        else:
+            symmetry_frame.pack_forget()
 
+    tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)"}
     tool_buttons = {}
     for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill")):
         btn = tk.Button(tool_frame, text=label, width=7,
                         command=lambda t=tool_name: set_tool(t))
         btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(btn, tool_tooltips[tool_name])
         tool_buttons[tool_name] = btn
 
     tool_buttons[current_tool].configure(relief=tk.SUNKEN)
     for view in grid_views:
         view.configure(cursor=TOOL_CURSORS[current_tool])
+
 
     # Palette
     palette_area = tk.Frame(left_panel, bg="#333333")
@@ -1065,7 +1151,7 @@ def main():
     controls_text = (
         "LMB / drag: Draw   RMB / drag: Erase\n"
         "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo\n"
-        "Y: Pencil tool   F: Fill tool"
+        "Y: Pencil tool   F: Fill tool   S: Cycle symmetry"
     )
     controls_label = tk.Label(left_panel, text=controls_text, bg="#333333",
                               fg="#cccccc", font=("TkDefaultFont", 11),
@@ -1129,6 +1215,22 @@ def main():
         draw_grid(event.widget)
 
     root.bind("<Configure>", on_resize)
+    def on_hover(event):
+        global hover_cell
+        canvas = event.widget
+        col, row = pixel_to_cell(canvas, event.x, event.y)
+        if (canvas, col, row) == hover_cell:
+            return
+        hover_cell = (canvas, col, row)
+        clear_hover(canvas)
+        if col is not None:
+            draw_hover(canvas, col, row)
+
+    def on_hover_leave(event):
+        global hover_cell
+        hover_cell = (None, None, None)
+        clear_hover(event.widget)
+
     for view in grid_views:
         view.bind("<Configure>", on_canvas_resize)
         view.bind("<Button-1>", lambda e: on_click(e, "draw"))
@@ -1137,6 +1239,8 @@ def main():
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
         view.bind("<Alt-Button-1>", on_pick_color)
         view.bind("<Alt-B1-Motion>", on_pick_color)
+        view.bind("<Motion>", on_hover)
+        view.bind("<Leave>", on_hover_leave)
 
     def do_undo(event=None):
         if undo.undo(_layers, _active_layer_idx, grids, select_layer):
@@ -1159,6 +1263,16 @@ def main():
     root.bind("<Control-o>", lambda e: do_load())
     root.bind("y", lambda e: set_tool("pencil"))
     root.bind("f", lambda e: set_tool("fill"))
+
+    SYMMETRY_CYCLE = ["None", "Left/Right", "Top/Bottom", "Radial"]
+
+    def cycle_symmetry(event=None):
+        global current_symmetry
+        idx = SYMMETRY_CYCLE.index(current_symmetry)
+        current_symmetry = SYMMETRY_CYCLE[(idx + 1) % len(SYMMETRY_CYCLE)]
+        symmetry_var.set(current_symmetry)
+
+    root.bind("s", lambda e: cycle_symmetry())
 
     def on_close():
         if dirty:
