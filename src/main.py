@@ -568,20 +568,27 @@ def main():
         view.configure(cursor=TOOL_CURSORS[current_tool])
 
     # Palette
-    palette_label = tk.Label(left_panel, text="Color", bg="#333333", fg="#cccccc")
-    palette_label.pack(pady=(15, 5))
+    palette_area = tk.Frame(left_panel, bg="#333333")
+    palette_area.pack(padx=15, pady=(15, 0), fill=tk.X)
+
+    current_col = tk.Frame(palette_area, bg="#333333")
+    current_col.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 6))
+
+    tk.Label(current_col, text="Current\nColor", bg="#333333", fg="#cccccc", justify=tk.CENTER).pack(pady=(0, 4))
 
     global color_indicator
-    color_indicator = tk.Canvas(left_panel, width=30, height=30,
+    color_indicator = tk.Canvas(current_col, width=30, height=30,
                                 bg=selected_color, highlightthickness=1,
                                 highlightbackground="#666666")
-    color_indicator.pack(pady=(0, 5))
+    color_indicator.pack()
 
-    palette_area = tk.Frame(left_panel, bg="#333333")
-    palette_area.pack(padx=15, pady=(10, 0), fill=tk.X)
+    palette_col = tk.Frame(palette_area, bg="#333333")
+    palette_col.pack(side=tk.LEFT, fill=tk.Y)
 
-    palette_canvas = tk.Canvas(palette_area, bg="#333333", highlightthickness=0)
-    palette_canvas.pack(side=tk.LEFT, fill=tk.Y)
+    tk.Label(palette_col, text="Colors", bg="#333333", fg="#cccccc").pack(pady=(0, 4))
+
+    palette_canvas = tk.Canvas(palette_col, bg="#333333", highlightthickness=0)
+    palette_canvas.pack(fill=tk.Y)
 
     palette_rows = build_palette()
 
@@ -590,7 +597,7 @@ def main():
         w = palette_area.winfo_width()
         if w <= 1:
             return
-        cell_w = (w * 0.375) / PALETTE_STEPS
+        cell_w = (w * 0.38) / PALETTE_STEPS
         cell_h = cell_w
         for row_idx, row in enumerate(palette_rows):
             for col_idx, color in enumerate(row):
@@ -609,7 +616,7 @@ def main():
         w = palette_area.winfo_width()
         if w <= 1:
             return
-        cell_w = (w * 0.375) / PALETTE_STEPS
+        cell_w = (w * 0.38) / PALETTE_STEPS
         cell_h = cell_w
         col = int(event.x / cell_w)
         row = int(event.y / cell_h)
@@ -617,6 +624,7 @@ def main():
             set_color(palette_rows[row][col])
 
     palette_area.bind("<Configure>", draw_palette)
+    palette_col.bind("<Configure>", draw_palette)
     palette_canvas.bind("<Button-1>", on_palette_click)
 
     # Custom color palette
@@ -625,8 +633,13 @@ def main():
     custom_colors = list(saved_custom) if saved_custom and len(saved_custom) == CUSTOM_SLOTS else ["#ffffff"] * CUSTOM_SLOTS
     custom_swatches = []
 
-    custom_frame = tk.Frame(palette_area, bg="#333333")
-    custom_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+    custom_col = tk.Frame(palette_area, bg="#333333")
+    custom_col.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+
+    tk.Label(custom_col, text="Custom colors", bg="#333333", fg="#cccccc").pack(pady=(0, 4))
+
+    custom_frame = tk.Frame(custom_col, bg="#333333")
+    custom_frame.pack(fill=tk.Y)
 
     def pick_custom_color(idx):
         from tkinter import colorchooser
@@ -791,6 +804,8 @@ def main():
             "You have unsaved changes. Continue without saving?"
         )
 
+    last_filepath = [None]
+
     def do_new():
         if not check_unsaved():
             return
@@ -801,26 +816,32 @@ def main():
         select_layer(0)
         dirty = False
         undo.clear()
+        last_filepath[0] = None
 
     def do_save():
         global dirty
-        path = filedialog.asksaveasfilename(
-            defaultextension=".nbx",
-            filetypes=[("NodeBox files", "*.nbx")],
-        )
+        import os
+        kwargs = dict(defaultextension=".nbx", filetypes=[("NodeBox files", "*.nbx")])
+        if last_filepath[0]:
+            kwargs["initialdir"] = os.path.dirname(last_filepath[0])
+            kwargs["initialfile"] = os.path.basename(last_filepath[0])
+        path = filedialog.asksaveasfilename(**kwargs)
         if path:
             json_str = save_nbx(layers)
             with open(path, "w") as f:
                 f.write(json_str)
             dirty = False
+            last_filepath[0] = path
 
     def do_load():
         if not check_unsaved():
             return
         global dirty
-        path = filedialog.askopenfilename(
-            filetypes=[("NodeBox files", "*.nbx")],
-        )
+        import os
+        kwargs = dict(filetypes=[("NodeBox files", "*.nbx")])
+        if last_filepath[0]:
+            kwargs["initialdir"] = os.path.dirname(last_filepath[0])
+        path = filedialog.askopenfilename(**kwargs)
         if path:
             with open(path, "r") as f:
                 json_str = f.read()
@@ -835,6 +856,7 @@ def main():
             select_layer(0)
             dirty = False
             undo.clear()
+            last_filepath[0] = path
 
     def _composite_view(view):
         composite = {}
@@ -1034,7 +1056,7 @@ def main():
     save_btn = tk.Button(button_frame, text="Save", width=8, command=do_save)
     save_btn.pack(side=tk.LEFT, padx=5)
 
-    load_btn = tk.Button(button_frame, text="Load", width=8, command=do_load)
+    load_btn = tk.Button(button_frame, text="Open", width=8, command=do_load)
     load_btn.pack(side=tk.LEFT, padx=5)
 
     export_frame = tk.Frame(left_panel, bg="#333333")
@@ -1046,7 +1068,7 @@ def main():
         "Y: Pencil tool   F: Fill tool"
     )
     controls_label = tk.Label(left_panel, text=controls_text, bg="#333333",
-                              fg="#cccccc", font=("TkDefaultFont", 9),
+                              fg="#cccccc", font=("TkDefaultFont", 11),
                               justify=tk.LEFT, anchor="w")
     controls_label.pack(side=tk.BOTTOM, padx=5, pady=(0, 5), fill=tk.X)
 
@@ -1132,6 +1154,9 @@ def main():
 
     root.bind("<Control-z>", do_undo)
     root.bind("<Control-y>", do_redo)
+    root.bind("<Control-s>", lambda e: do_save())
+    root.bind("<Control-n>", lambda e: do_new())
+    root.bind("<Control-o>", lambda e: do_load())
     root.bind("y", lambda e: set_tool("pencil"))
     root.bind("f", lambda e: set_tool("fill"))
 
