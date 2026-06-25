@@ -127,6 +127,7 @@ REVERSE_LABELS = {"top": "Bottom", "front": "Back", "side": "Right"}
 PRIMARY_LABELS = {"top": "Top", "front": "Front", "side": "Left"}
 dirty = False
 last_saved_state = None
+_pixel_clipboard = None
 
 def undo_push():
     undo.push(_layers, _active_layer_idx)
@@ -305,7 +306,13 @@ def flood_fill(grid, view_name, col, row, erase=False):
         if target_color is None:
             return
     else:
-        fill_color = _resolve_fill_color(view_name, col, row)
+        # Intended fill color is always selected_color (or layer override for inside cells),
+        # regardless of whether the click started inside or outside node bounds.
+        inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
+        if inside_click and _active_layer_idx != 0 and _layers:
+            fill_color = _layers[0][view_name].get((col, row), selected_color)
+        else:
+            fill_color = selected_color
         if target_color == fill_color:
             return
     stack = [(col, row)]
@@ -321,7 +328,8 @@ def flood_fill(grid, view_name, col, row, erase=False):
         if erase:
             grid.pop((c, r), None)
         else:
-            grid[(c, r)] = fill_color
+            in_bounds = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+            grid[(c, r)] = fill_color if in_bounds else "#000000"
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nc, nr = c + dc, r + dr
             if 0 <= nc < GRID_SIZE and 0 <= nr < GRID_SIZE:
@@ -416,61 +424,32 @@ def main():
 
     view_title_labels = {}
     view_toggle_buttons = {}
-    view_copy_buttons = {}
-    view_cross_copy_buttons = {}
+    view_paste_buttons = {}
 
     name_to_canvas = {}
 
-    COPYABLE_VIEWS = {"top", "front", "side"}
-
-    CROSS_COPY_PAIR = {"front": "side", "side": "front"}
     FACE_LABELS = {
         "top": "Top", "bottom": "Bottom",
         "front": "Front", "back": "Back",
         "side": "Left", "right": "Right",
     }
 
-    def copy_from_other(view_name):
-        primary_key = view_name
-        reverse_key = REVERSE_VIEW[view_name]
-        layer = layers[_active_layer_idx]
-        undo_push()
-        if view_reverse[view_name]:
-            layer[reverse_key] = dict(layer[primary_key])
-            grids[view_name] = layer[reverse_key]
-        else:
-            layer[primary_key] = dict(layer[reverse_key])
-            grids[view_name] = layer[primary_key]
-        mark_dirty()
-        draw_grid(name_to_canvas[view_name])
-        update_preview()
+    def copy_pixels(view_name):
+        global _pixel_clipboard
+        _pixel_clipboard = dict(grids[view_name])
+        for btn in view_paste_buttons.values():
+            btn.configure(state=tk.NORMAL, fg="#bbbbbb")
 
-    def cross_copy(view_name):
-        source_key = _grid_key(CROSS_COPY_PAIR[view_name])
-        layer = layers[_active_layer_idx]
+    def paste_pixels(view_name):
+        if _pixel_clipboard is None:
+            return
+        undo_push()
         dest_key = _grid_key(view_name)
-        undo_push()
-        layer[dest_key] = dict(layer.get(source_key, {}))
-        grids[view_name] = layer[dest_key]
+        layers[_active_layer_idx][dest_key] = dict(_pixel_clipboard)
+        grids[view_name] = layers[_active_layer_idx][dest_key]
         mark_dirty()
         draw_grid(name_to_canvas[view_name])
         update_preview()
-
-    def _update_copy_button(view_name):
-        is_rev = view_reverse[view_name]
-        if view_name in COPYABLE_VIEWS:
-            other_label = PRIMARY_LABELS[view_name] if is_rev else REVERSE_LABELS[view_name]
-            view_copy_buttons[view_name].configure(text=f"Copy from {other_label}")
-            view_copy_buttons[view_name].place(x=4, y=76, anchor="nw")
-        elif is_rev:
-            view_copy_buttons[view_name].configure(text=f"Copy from {PRIMARY_LABELS[view_name]}")
-            view_copy_buttons[view_name].place(x=4, y=76, anchor="nw")
-        else:
-            view_copy_buttons[view_name].place_forget()
-        if view_name in CROSS_COPY_PAIR:
-            source_label = FACE_LABELS[_grid_key(CROSS_COPY_PAIR[view_name])]
-            view_cross_copy_buttons[view_name].configure(text=f"Copy from {source_label}")
-            view_cross_copy_buttons[view_name].place(x=4, y=118, anchor="nw")
 
     def toggle_reverse(view_name):
         view_reverse[view_name] = not view_reverse[view_name]
@@ -481,9 +460,6 @@ def main():
             fg="#999999" if is_rev else "#88bbff")
         view_toggle_buttons[view_name].configure(
             text=f"Switch to {PRIMARY_LABELS[view_name]}" if is_rev else f"Switch to {REVERSE_LABELS[view_name]}")
-        _update_copy_button(view_name)
-        if view_name in CROSS_COPY_PAIR:
-            _update_copy_button(CROSS_COPY_PAIR[view_name])
         draw_grid(name_to_canvas[view_name])
         update_preview()
 
@@ -501,23 +477,19 @@ def main():
                         command=lambda: toggle_reverse(view_name))
         btn.place(x=4, y=34, anchor="nw")
         view_toggle_buttons[view_name] = btn
-        copy_btn = tk.Button(frame, text=f"Copy from {REVERSE_LABELS[view_name]}",
+        copy_btn = tk.Button(frame, text="Copy Pixels",
                              bg="#3a3a3a", fg="#bbbbbb",
                              font=("TkDefaultFont", 9), relief=tk.FLAT,
                              padx=4, pady=0,
-                             command=lambda: copy_from_other(view_name))
-        view_copy_buttons[view_name] = copy_btn
-        if view_name in COPYABLE_VIEWS:
-            copy_btn.place(x=4, y=76, anchor="nw")
-        if view_name in CROSS_COPY_PAIR:
-            initial_label = FACE_LABELS[CROSS_COPY_PAIR[view_name]]
-            cross_btn = tk.Button(frame, text=f"Copy from {initial_label}",
-                                  bg="#3a3a3a", fg="#bbbbbb",
-                                  font=("TkDefaultFont", 9), relief=tk.FLAT,
-                                  padx=4, pady=0,
-                                  command=lambda: cross_copy(view_name))
-            cross_btn.place(x=4, y=118, anchor="nw")
-            view_cross_copy_buttons[view_name] = cross_btn
+                             command=lambda vn=view_name: copy_pixels(vn))
+        copy_btn.place(x=4, y=76, anchor="nw")
+        paste_btn = tk.Button(frame, text="Paste Pixels",
+                              bg="#3a3a3a", fg="#555555",
+                              font=("TkDefaultFont", 9), relief=tk.FLAT,
+                              padx=4, pady=0, state=tk.DISABLED,
+                              command=lambda vn=view_name: paste_pixels(vn))
+        paste_btn.place(x=4, y=118, anchor="nw")
+        view_paste_buttons[view_name] = paste_btn
         import_png_btn = tk.Button(frame, text="Import PNG",
                                    bg="#3a3a3a", fg="#bbbbbb",
                                    font=("TkDefaultFont", 9), relief=tk.FLAT,

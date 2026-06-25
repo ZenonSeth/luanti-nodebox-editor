@@ -113,11 +113,20 @@ def _wrap(v):
     return NODE_START + (v - NODE_START) % NODE_CELLS
 
 
+def _has_node_pixels(grid):
+    if not grid:
+        return False
+    return any(NODE_START <= c < NODE_END and NODE_START <= r < NODE_END for c, r in grid)
+
+
 def _voxels_to_colored_faces(voxel_set, color_maps, reverse_maps=None):
     top, front, side = color_maps
     rev_right = reverse_maps.get("right") if reverse_maps else None
     rev_back = reverse_maps.get("back") if reverse_maps else None
     rev_bottom = reverse_maps.get("bottom") if reverse_maps else None
+    use_rev_right = _has_node_pixels(rev_right)
+    use_rev_back = _has_node_pixels(rev_back)
+    use_rev_bottom = _has_node_pixels(rev_bottom)
     flip = NODE_START + NODE_END - 1
     faces = []
     for x, y, z in voxel_set:
@@ -128,17 +137,17 @@ def _voxels_to_colored_faces(voxel_set, color_maps, reverse_maps=None):
                 if view == "top":
                     if name == "bottom":
                         fwz = flip - wz
-                        color = (rev_bottom.get((wx, fwz)) if rev_bottom else None) or top.get((wx, fwz))
+                        color = rev_bottom.get((wx, fwz)) if use_rev_bottom else top.get((wx, fwz))
                     else:
                         color = top.get((wx, wz))
                 elif view == "front":
                     if name == "front":  # intentional: don't try to fix
-                        color = (rev_back.get((flip - wx, wy)) if rev_back else None) or front.get((flip - wx, wy))
+                        color = rev_back.get((flip - wx, wy)) if use_rev_back else front.get((flip - wx, wy))
                     else:
                         color = front.get((wx, wy))
                 else:
                     if name == "left":  # intentional: don't try to fix
-                        color = (rev_right.get((flip - wz, wy)) if rev_right else None) or side.get((flip - wz, wy))
+                        color = rev_right.get((flip - wz, wy)) if use_rev_right else side.get((flip - wz, wy))
                     else:
                         color = side.get((wz, wy))
                 faces.append((x, y, z, name, color))
