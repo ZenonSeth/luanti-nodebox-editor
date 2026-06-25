@@ -21,7 +21,7 @@
       - Export differing opposite textures as separate PNGs
 - [x] Copy To buttons on front/side views to copy into the other view
       (useful for symmetrical shapes, with undo support)
-- [ ] Symmetry drawing: toggle 2-way or 4-way symmetry around center point,
+- [x] Symmetry drawing: toggle 2-way or 4-way symmetry around center point,
       plus a mirror checkbox. Applies to pencil tool only, not fill.
 - [ ] Variable pencil tool: draws the selected color with a random offset
       (e.g. #ff00cc might draw as #f000c0). Controllable via a slider
@@ -29,9 +29,8 @@
 
 ## Future features
 
-- [ ] Import PNG texture: load a 32x32 PNG into any of the three 2D views,
+- [x] Import PNG texture: load a 32x32 PNG into any of the three 2D views,
       mapping pixel colors to grid cells (fills the node region only)
-- [ ] Import existing Lua node_box definitions
 - [ ] 3D preview: scanline back-to-front rendering optimization
 - [x] 3D preview: use per-cell colors from grids instead of flat shading
       (each face's color comes from the corresponding view's grid cell)

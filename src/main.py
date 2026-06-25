@@ -458,16 +458,16 @@ def main():
         if view_name in COPYABLE_VIEWS:
             other_label = PRIMARY_LABELS[view_name] if is_rev else REVERSE_LABELS[view_name]
             view_copy_buttons[view_name].configure(text=f"Copy from {other_label}")
-            view_copy_buttons[view_name].place(x=4, y=62, anchor="nw")
+            view_copy_buttons[view_name].place(x=4, y=76, anchor="nw")
         elif is_rev:
             view_copy_buttons[view_name].configure(text=f"Copy from {PRIMARY_LABELS[view_name]}")
-            view_copy_buttons[view_name].place(x=4, y=62, anchor="nw")
+            view_copy_buttons[view_name].place(x=4, y=76, anchor="nw")
         else:
             view_copy_buttons[view_name].place_forget()
         if view_name in CROSS_COPY:
             _, source_label = CROSS_COPY[view_name][is_rev]
             view_cross_copy_buttons[view_name].configure(text=f"Copy from {source_label}")
-            view_cross_copy_buttons[view_name].place(x=4, y=90, anchor="nw")
+            view_cross_copy_buttons[view_name].place(x=4, y=118, anchor="nw")
 
     def toggle_reverse(view_name):
         view_reverse[view_name] = not view_reverse[view_name]
@@ -502,7 +502,7 @@ def main():
                              command=lambda: copy_from_other(view_name))
         view_copy_buttons[view_name] = copy_btn
         if view_name in COPYABLE_VIEWS:
-            copy_btn.place(x=4, y=62, anchor="nw")
+            copy_btn.place(x=4, y=76, anchor="nw")
         if view_name in CROSS_COPY:
             _, initial_label = CROSS_COPY[view_name][False]
             cross_btn = tk.Button(frame, text=f"Copy from {initial_label}",
@@ -510,8 +510,14 @@ def main():
                                   font=("TkDefaultFont", 9), relief=tk.FLAT,
                                   padx=4, pady=0,
                                   command=lambda: cross_copy(view_name))
-            cross_btn.place(x=4, y=90, anchor="nw")
+            cross_btn.place(x=4, y=118, anchor="nw")
             view_cross_copy_buttons[view_name] = cross_btn
+        import_png_btn = tk.Button(frame, text="Import PNG",
+                                   bg="#3a3a3a", fg="#bbbbbb",
+                                   font=("TkDefaultFont", 9), relief=tk.FLAT,
+                                   padx=4, pady=0,
+                                   command=lambda: do_import_png(view_name))
+        import_png_btn.place(x=4, y=160, anchor="nw")
         canvas = tk.Canvas(frame, bg="#2a2a2a", highlightthickness=0)
         canvas.place(relx=0.55, rely=0.5, anchor="center")
         name_to_canvas[view_name] = canvas
@@ -943,6 +949,38 @@ def main():
             dirty = False
             undo.clear()
             last_filepath[0] = path
+
+    def do_import_png(view_name):
+        path = filedialog.askopenfilename(filetypes=[("PNG files", "*.png")])
+        if not path:
+            return
+        try:
+            import png as _png
+            reader = _png.Reader(filename=path)
+            w, h, rows_iter, _ = reader.asRGBA8()
+            rows = list(rows_iter)
+        except Exception as e:
+            messagebox.showerror("Import failed", str(e))
+            return
+        if (w, h) not in ((8, 8), (16, 16), (32, 32)):
+            messagebox.showerror("Invalid size", f"PNG must be 8×8, 16×16, or 32×32 pixels (got {w}×{h}).")
+            return
+        scale = 32 // w
+        undo_push()
+        grid = grids[view_name]
+        for py in range(h):
+            row = rows[py]
+            for px in range(w):
+                idx = px * 4
+                r, g, b, a = row[idx], row[idx + 1], row[idx + 2], row[idx + 3]
+                if a < 128:
+                    continue
+                color = f"#{r:02x}{g:02x}{b:02x}"
+                for dy in range(scale):
+                    for dx in range(scale):
+                        grid[(NODE_START + px * scale + dx, NODE_START + py * scale + dy)] = color
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
 
     def _composite_view(view):
         composite = {}
