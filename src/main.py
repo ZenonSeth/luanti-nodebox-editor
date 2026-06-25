@@ -7,6 +7,7 @@ from nbx_format import save_nbx, load_nbx
 from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
+from color_picker import ask_color
 import undo
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
@@ -35,6 +36,7 @@ def add_tooltip(widget, text):
 
 DEFAULT_SETTINGS = {
     "zoom": "1x",
+    "use_system_colorpicker": False,
 }
 
 
@@ -738,13 +740,15 @@ def main():
     custom_frame.pack(fill=tk.Y)
 
     def pick_custom_color(idx):
-        from tkinter import colorchooser
-        result = colorchooser.askcolor(initialcolor=custom_colors[idx], title="Pick Color")
-        if result[1]:
-            custom_colors[idx] = result[1]
+        if settings.get("use_system_colorpicker"):
+            from tkinter import colorchooser
+            result = colorchooser.askcolor(initialcolor=custom_colors[idx], title="Pick Color")
+            picked = result[1] if result and result[1] else None
+        else:
+            picked = ask_color(root, initial_color=custom_colors[idx], title="Pick Color")
+        if picked:
+            custom_colors[idx] = picked.lower()
             custom_swatches[idx].configure(bg=custom_colors[idx])
-            settings["custom_colors"] = list(custom_colors)
-            save_settings(settings)
 
     def select_custom_color(idx):
         set_color(custom_colors[idx])
@@ -923,7 +927,7 @@ def main():
             kwargs["initialfile"] = os.path.basename(last_filepath[0])
         path = filedialog.asksaveasfilename(**kwargs)
         if path:
-            json_str = save_nbx(layers)
+            json_str = save_nbx(layers, custom_colors=custom_colors)
             with open(path, "w") as f:
                 f.write(json_str)
             dirty = False
@@ -941,7 +945,7 @@ def main():
         if path:
             with open(path, "r") as f:
                 json_str = f.read()
-            loaded = load_nbx(json_str)
+            loaded, loaded_colors = load_nbx(json_str)
             loaded[0]["name"] = "Top Layer"
             for layer in loaded:
                 layer.setdefault("bottom", {})
@@ -949,6 +953,10 @@ def main():
                 layer.setdefault("right", {})
             layers.clear()
             layers.extend(loaded)
+            if loaded_colors and len(loaded_colors) == len(custom_colors):
+                custom_colors[:] = loaded_colors
+                for i, swatch in enumerate(custom_swatches):
+                    swatch.configure(bg=custom_colors[i])
             select_layer(0)
             dirty = False
             undo.clear()
@@ -1259,7 +1267,17 @@ def main():
             "Y: Pencil tool  |  F: Fill tool  |  S: Cycle symmetry",
         ])
 
-        tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(4, 16))
+        use_system_var = tk.BooleanVar(value=settings.get("use_system_colorpicker", False))
+        def on_toggle_colorpicker():
+            settings["use_system_colorpicker"] = use_system_var.get()
+            save_settings(settings)
+        tk.Checkbutton(win, text="Use system color picker",
+                       variable=use_system_var, command=on_toggle_colorpicker,
+                       bg="#2a2a2a", fg="#cccccc", selectcolor="#1a1a1a",
+                       activebackground="#2a2a2a", activeforeground="#cccccc",
+                       font=("TkDefaultFont", 10)).pack(pady=(8, 0))
+
+        tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(8, 16))
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
