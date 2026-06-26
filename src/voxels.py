@@ -159,29 +159,42 @@ def grids_to_colored_faces(top, front, side):
     return _voxels_to_colored_faces(voxels, (top, front, side))
 
 
+def _effective_reverse(primary, opposite):
+    """Return opposite if it has any pixels, else fall back to primary."""
+    if _has_node_pixels(opposite):
+        return opposite
+    return primary
+
+
 def layers_to_colored_faces(layers):
     all_voxels = set()
     merged_top = {}
     merged_front = {}
     merged_side = {}
-    merged_right = {}
-    merged_back = {}
-    merged_bottom = {}
+    eff_right = {}
+    eff_back = {}
+    eff_bottom = {}
+    any_right = any(_has_node_pixels(l.get("right", {})) for l in layers)
+    any_back = any(_has_node_pixels(l.get("back", {})) for l in layers)
+    any_bottom = any(_has_node_pixels(l.get("bottom", {})) for l in layers)
     for layer in reversed(layers):
         all_voxels |= visual_hull(layer["top"], layer["front"], layer["side"])
         merged_top.update(layer["top"])
         merged_front.update(layer["front"])
         merged_side.update(layer["side"])
-        merged_right.update(layer.get("right", {}))
-        merged_back.update(layer.get("back", {}))
-        merged_bottom.update(layer.get("bottom", {}))
+        if any_back:
+            eff_back.update(_effective_reverse(layer["front"], layer.get("back", {})))
+        if any_right:
+            eff_right.update(_effective_reverse(layer["side"], layer.get("right", {})))
+        if any_bottom:
+            eff_bottom.update(_effective_reverse(layer["top"], layer.get("bottom", {})))
     reverse_maps = {}
-    if merged_right:
-        reverse_maps["right"] = merged_right
-    if merged_back:
-        reverse_maps["back"] = merged_back
-    if merged_bottom:
-        reverse_maps["bottom"] = merged_bottom
+    if any_right:
+        reverse_maps["right"] = eff_right
+    if any_back:
+        reverse_maps["back"] = eff_back
+    if any_bottom:
+        reverse_maps["bottom"] = eff_bottom
     return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side), reverse_maps)
 
 
