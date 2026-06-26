@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
@@ -1076,10 +1076,21 @@ def main():
         mark_dirty()
         draw_grid(name_to_canvas[view_name])
 
+    _OPPOSITE_PRIMARY = {"back": "front", "right": "side", "bottom": "top"}
+
     def _composite_view(view):
+        vis = _visible_layers()
+        primary_key = _OPPOSITE_PRIMARY.get(view)
+        if primary_key is not None:
+            any_opposite = any(_has_node_pixels(l.get(view, {})) for l in vis)
+        else:
+            any_opposite = False
         composite = {}
-        for layer in reversed(_visible_layers()):
-            composite.update(layer[view])
+        for layer in reversed(vis):
+            if any_opposite:
+                composite.update(_effective_reverse(layer[primary_key], layer.get(view, {})))
+            else:
+                composite.update(layer[view])
         return composite
 
     PREVIEW_SIZE = 128
