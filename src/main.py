@@ -307,10 +307,6 @@ def _apply_noise(hex_color):
 def _resolve_fill_color(view_name, col, row):
     if not (NODE_START <= col < NODE_END and NODE_START <= row < NODE_END):
         return "#000000"
-    if _active_layer_idx != 0 and _layers:
-        top_layer_grid = _layers[0][view_name]
-        if (col, row) in top_layer_grid:
-            return top_layer_grid[(col, row)]
     return selected_color
 
 
