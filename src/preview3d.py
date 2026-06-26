@@ -75,7 +75,7 @@ def _draw_backdrop_cells(canvas, grid, verts_fn, project):
 
 
 
-def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=None):
+def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=None, zoom=1.0):
     canvas.delete("all")
 
     w = canvas.winfo_width()
@@ -94,7 +94,7 @@ def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=N
     cx, cy, cz = grid_mid, grid_mid, grid_mid
 
     size = min(w, h)
-    scale = size / 50
+    scale = size / 50 * zoom
     screen_cx = w / 2
     screen_cy = h / 2
 

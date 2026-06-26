@@ -224,6 +224,7 @@ def draw_grid(canvas):
 preview_canvas = None
 preview_azimuth = 35
 preview_elevation = 25
+preview_zoom = 1.0
 cached_faces = []
 cached_backdrop_grids = None
 show_shadows = False
@@ -274,7 +275,8 @@ def redraw_preview():
     render_preview(preview_canvas,
                    cached_faces if show_model else [],
                    preview_azimuth, preview_elevation,
-                   backdrop_grids=cached_backdrop_grids if show_shadows else None)
+                   backdrop_grids=cached_backdrop_grids if show_shadows else None,
+                   zoom=preview_zoom)
 
 
 def update_preview():
@@ -557,6 +559,7 @@ def main():
     preview_canvas = preview_3d
 
     drag_start = [None, None]
+    zoom_drag_start = [None]
 
     def on_preview_press(event):
         drag_start[0] = event.x
@@ -574,7 +577,21 @@ def main():
         drag_start[1] = event.y
         redraw_preview()
 
+    def on_zoom_press(event):
+        zoom_drag_start[0] = event.y
+
+    def on_zoom_drag(event):
+        global preview_zoom
+        if zoom_drag_start[0] is None:
+            return
+        dy = event.y - zoom_drag_start[0]
+        zoom_drag_start[0] = event.y
+        preview_zoom = max(0.5, min(2.5, preview_zoom * (1.0 - dy * 0.005)))
+        redraw_preview()
+
     preview_3d.bind("<B1-Motion>", on_preview_drag)
+    preview_3d.bind("<Button-3>", on_zoom_press)
+    preview_3d.bind("<B3-Motion>", on_zoom_drag)
     preview_3d.bind("<Configure>", lambda e: redraw_preview())
 
     btn_style = dict(bg="#2a2a2a", fg="#aaaaaa", relief="flat",
