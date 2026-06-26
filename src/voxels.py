@@ -2,9 +2,10 @@ GRID_SIZE = 64
 
 
 def visual_hull(top, front, side):
+    flip = NODE_START + NODE_END - 1
     top_filled = set()
     for (col, row) in top:
-        top_filled.add((col, row))
+        top_filled.add((col, flip - row))
 
     front_filled = set()
     for (col, row) in front:
@@ -136,10 +137,9 @@ def _voxels_to_colored_faces(voxel_set, color_maps, reverse_maps=None):
                 wx, wy, wz = _wrap(x), _wrap(y), _wrap(z)
                 if view == "top":
                     if name == "bottom":
-                        fwz = flip - wz
-                        color = rev_bottom.get((wx, fwz)) if use_rev_bottom else top.get((wx, fwz))
+                        color = rev_bottom.get((wx, wz)) if use_rev_bottom else top.get((wx, wz))
                     else:
-                        color = top.get((wx, wz))
+                        color = top.get((wx, flip - wz))
                 elif view == "front":
                     if name == "front":  # intentional: don't try to fix
                         color = rev_back.get((flip - wx, wy)) if use_rev_back else front.get((flip - wx, wy))

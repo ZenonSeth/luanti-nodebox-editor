@@ -1214,8 +1214,8 @@ def main():
             f'    "{bottom_name}",\n'
             f'    "{left_name}",\n'
             f'    "{right_name}",\n'
-            f'    "{front_name}",\n'
             f'    "{back_name}",\n'
+            f'    "{front_name}",\n'
             '},\n'
         )
 
