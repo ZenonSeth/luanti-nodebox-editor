@@ -185,6 +185,17 @@ def layers_to_colored_faces(layers):
     return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side), reverse_maps)
 
 
+def layers_to_merged_grids(layers):
+    merged_top = {}
+    merged_front = {}
+    merged_side = {}
+    for layer in reversed(layers):
+        merged_top.update(layer["top"])
+        merged_front.update(layer["front"])
+        merged_side.update(layer["side"])
+    return merged_top, merged_front, merged_side
+
+
 def bounding_box(voxels):
     if not voxels:
         return None

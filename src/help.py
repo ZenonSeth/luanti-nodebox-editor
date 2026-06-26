@@ -1,7 +1,7 @@
 import tkinter as tk
 
 
-def show_help(root, settings, save_settings):
+def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options_current=False):
     win = tk.Toplevel(root)
     win.title("Help / About")
     w, h = 780, 700
@@ -85,10 +85,20 @@ def show_help(root, settings, save_settings):
         settings["use_system_colorpicker"] = use_system_var.get()
         save_settings(settings)
 
+    cb_style = dict(bg="#2a2a2a", fg="#cccccc", selectcolor="#1a1a1a",
+                    activebackground="#2a2a2a", activeforeground="#cccccc",
+                    font=("TkDefaultFont", 11))
+
     tk.Checkbutton(win, text="Use system color picker",
                    variable=use_system_var, command=on_toggle_colorpicker,
-                   bg="#2a2a2a", fg="#cccccc", selectcolor="#1a1a1a",
-                   activebackground="#2a2a2a", activeforeground="#cccccc",
-                   font=("TkDefaultFont", 11)).pack(pady=(8, 0))
+                   **cb_style).pack(pady=(8, 0))
+
+    if on_3d_options is not None:
+        show_3d_var = tk.BooleanVar(value=show_3d_options_current)
+        def on_toggle_3d_options():
+            on_3d_options(show_3d_var.get())
+        tk.Checkbutton(win, text="Show 3D View options",
+                       variable=show_3d_var, command=on_toggle_3d_options,
+                       **cb_style).pack(pady=(4, 0))
 
     tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(8, 16))

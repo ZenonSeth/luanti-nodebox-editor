@@ -60,7 +60,22 @@ def _project(x, y, z, cx, cy, cz, cos_az, sin_az, cos_el, sin_el, scale, screen_
     return sx, sy
 
 
-def render_preview(canvas, faces, azimuth=None, elevation=None):
+BACKDROP_FILL = "#888888"
+BACKDROP_STIPPLE = "gray50"
+
+
+def _draw_backdrop_cells(canvas, grid, verts_fn, project):
+    for (col, row), color in grid.items():
+        if not (NODE_START <= col < NODE_END and NODE_START <= row < NODE_END) or not color:
+            continue
+        pts = [project(*v) for v in verts_fn(col, row)]
+        coords = [c for sx, sy in pts for c in (sx, sy)]
+        canvas.create_polygon(coords, fill=BACKDROP_FILL, outline="", stipple=BACKDROP_STIPPLE)
+
+
+
+
+def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=None):
     canvas.delete("all")
 
     w = canvas.winfo_width()
@@ -108,6 +123,32 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
             fill=REF_CUBE_COLOR, dash=(3, 3)
         )
 
+    if backdrop_grids:
+        front_grid = backdrop_grids.get("front", {})
+        side_grid = backdrop_grids.get("side", {})
+
+        # Front view on the far z wall (away from camera)
+        fz = NODE_END if vz > 0 else NODE_START
+        _draw_backdrop_cells(canvas, front_grid,
+            lambda col, row: [(col, row, fz), (col+1, row, fz),
+                              (col+1, row+1, fz), (col, row+1, fz)],
+            project)
+
+        # Side view on the far x wall (away from camera)
+        fx = NODE_START if vx < 0 else NODE_END
+        _draw_backdrop_cells(canvas, side_grid,
+            lambda col, row: [(fx, row, col), (fx, row, col+1),
+                              (fx, row+1, col+1), (fx, row+1, col)],
+            project)
+
+        # Top view on the far y wall (away from camera)
+        top_grid = backdrop_grids.get("top", {})
+        fy = NODE_END if vy > 0 else NODE_START
+        _draw_backdrop_cells(canvas, top_grid,
+            lambda col, row: [(col, fy, row), (col+1, fy, row),
+                              (col+1, fy, row+1), (col, fy, row+1)],
+            project)
+
     if not faces:
         return
 
@@ -152,3 +193,4 @@ def render_preview(canvas, faces, azimuth=None, elevation=None):
             for sx, sy in proj_verts:
                 coords.extend([sx, sy])
             canvas.create_polygon(coords, fill=fill, outline="")
+

@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
@@ -224,6 +224,9 @@ preview_canvas = None
 preview_azimuth = 35
 preview_elevation = 25
 cached_faces = []
+cached_backdrop_grids = None
+show_shadows = False
+show_model = True
 _layers = None
 _active_layer_idx = 0
 hover_cell = (None, None, None)  # (canvas, col, row)
@@ -252,19 +255,25 @@ def _visible_layers():
 
 
 def rebuild_faces():
-    global cached_faces
+    global cached_faces, cached_backdrop_grids
     vis = _visible_layers()
     if vis:
         cached_faces = layers_to_colored_faces(vis)
+        mt, mf, ms = layers_to_merged_grids(vis)
+        cached_backdrop_grids = {"top": mt, "front": mf, "side": ms}
     else:
         cached_faces = []
+        cached_backdrop_grids = None
     redraw_preview()
 
 
 def redraw_preview():
     if preview_canvas is None:
         return
-    render_preview(preview_canvas, cached_faces, preview_azimuth, preview_elevation)
+    render_preview(preview_canvas,
+                   cached_faces if show_model else [],
+                   preview_azimuth, preview_elevation,
+                   backdrop_grids=cached_backdrop_grids if show_shadows else None)
 
 
 def update_preview():
@@ -564,9 +573,55 @@ def main():
         drag_start[1] = event.y
         redraw_preview()
 
-    preview_3d.bind("<Button-1>", on_preview_press)
     preview_3d.bind("<B1-Motion>", on_preview_drag)
     preview_3d.bind("<Configure>", lambda e: redraw_preview())
+
+    btn_style = dict(bg="#2a2a2a", fg="#aaaaaa", relief="flat",
+                     font=("TkDefaultFont", 8), bd=0, padx=4, pady=2,
+                     activebackground="#3a3a3a", activeforeground="#ffffff",
+                     cursor="hand2")
+
+    def _make_toggle(label, get_state, set_state):
+        def state_text():
+            return f"{label}: {'ON' if get_state() else 'OFF'}"
+        def toggle():
+            set_state(not get_state())
+            btn.config(text=state_text())
+            redraw_preview()
+        btn = tk.Button(preview_3d, text=state_text(), command=toggle, **btn_style)
+        return btn
+
+    shadows_btn = _make_toggle(
+        "Shadows",
+        lambda: show_shadows,
+        lambda v: globals().__setitem__("show_shadows", v),
+    )
+    model_btn = _make_toggle(
+        "Model",
+        lambda: show_model,
+        lambda v: globals().__setitem__("show_model", v),
+    )
+    # Hidden by default; revealed when "Show 3D View options" is enabled in Help
+    shadows_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=4)
+    model_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=28)
+    shadows_btn.place_forget()
+    model_btn.place_forget()
+
+    def set_3d_options_visible(visible):
+        global show_shadows, show_model
+        if visible:
+            shadows_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=4)
+            model_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=28)
+        else:
+            shadows_btn.place_forget()
+            model_btn.place_forget()
+            show_shadows = False
+            show_model = True
+            shadows_btn.config(text="Shadows: OFF")
+            model_btn.config(text="Model: ON")
+            redraw_preview()
+
+    preview_3d.bind("<Button-1>", on_preview_press)
 
     left_panel = tk.Frame(content, bg="#333333")
     left_panel.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=1, pady=1)
@@ -1235,7 +1290,9 @@ def main():
     controls_label.pack(side=tk.BOTTOM, padx=5, pady=(0, 5), fill=tk.X)
 
     def do_about():
-        show_help(root, settings, save_settings)
+        show_help(root, settings, save_settings,
+                  on_3d_options=set_3d_options_visible,
+                  show_3d_options_current=shadows_btn.winfo_ismapped())
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
