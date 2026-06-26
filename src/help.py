@@ -1,7 +1,7 @@
 import tkinter as tk
 
 
-def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options_current=False):
+def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options_current=False, on_show_intro=None):
     win = tk.Toplevel(root)
     win.title("Help / About")
     w, h = 780, 700
@@ -100,5 +100,10 @@ def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options
         tk.Checkbutton(win, text="Show 3D View options",
                        variable=show_3d_var, command=on_toggle_3d_options,
                        **cb_style).pack(pady=(4, 0))
+
+    tk.Button(win, text="Show intro again", width=14,
+              command=lambda: [win.destroy(), on_show_intro()],
+              bg="#2a2a2a", fg="#cccccc", relief="flat"
+              ).pack(pady=(12, 0))
 
     tk.Button(win, text="Close", width=10, command=win.destroy).pack(pady=(8, 16))

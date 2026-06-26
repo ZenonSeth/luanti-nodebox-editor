@@ -11,6 +11,7 @@ from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
 from help import show_help
+from tutorial_dialog import show_tutorial, open_tutorial
 import undo
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
@@ -1292,7 +1293,8 @@ def main():
     def do_about():
         show_help(root, settings, save_settings,
                   on_3d_options=set_3d_options_visible,
-                  show_3d_options_current=shadows_btn.winfo_ismapped())
+                  show_3d_options_current=shadows_btn.winfo_ismapped(),
+                  on_show_intro=lambda: open_tutorial(root, settings, save_settings))
 
     export_btn = tk.Button(export_frame, text="Export", width=8, command=do_export)
     export_btn.pack(side=tk.LEFT, padx=5)
@@ -1393,7 +1395,30 @@ def main():
         save_settings(settings)
         root.destroy()
 
+    def load_starter_model():
+        from starter_model import NBX
+        loaded, loaded_colors = load_nbx(NBX)
+        loaded[0]["name"] = "Top Layer"
+        for layer in loaded:
+            layer.setdefault("bottom", {})
+            layer.setdefault("back", {})
+            layer.setdefault("right", {})
+        layers.clear()
+        layers.extend(loaded)
+        if loaded_colors and len(loaded_colors) == len(custom_colors):
+            custom_colors[:] = loaded_colors
+            for i, swatch in enumerate(custom_swatches):
+                swatch.configure(bg=custom_colors[i])
+        select_layer(0)
+        undo.clear()
+
+    def on_startup():
+        if not settings.get("hide_tutorial", False):
+            load_starter_model()
+            show_tutorial(root, settings, save_settings)
+
     root.protocol("WM_DELETE_WINDOW", on_close)
+    root.after(200, on_startup)
     root.mainloop()
 
 
