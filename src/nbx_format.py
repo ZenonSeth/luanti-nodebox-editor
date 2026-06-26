@@ -58,10 +58,14 @@ def _encode_grid(grid, encode_row_fn):
     return rows
 
 
-def save_nbx(layers):
+def save_nbx(layers, custom_colors=None):
+    REVERSE_KEYS = ("bottom", "back", "right")
     all_grids = []
     for layer in layers:
         all_grids.extend([layer["top"], layer["front"], layer["side"]])
+        for rk in REVERSE_KEYS:
+            if layer.get(rk):
+                all_grids.append(layer[rk])
     colors = _collect_colors(all_grids)
 
     if len(colors) <= MAX_INDEXED_COLORS:
@@ -80,6 +84,9 @@ def save_nbx(layers):
                 "front": _encode_grid(layer["front"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
                 "side": _encode_grid(layer["side"], lambda g, r: _encode_row_indexed(g, r, palette_map)),
             }
+            for rk in REVERSE_KEYS:
+                if layer.get(rk):
+                    entry[rk] = _encode_grid(layer[rk], lambda g, r: _encode_row_indexed(g, r, palette_map))
             if not layer.get("visible", True):
                 entry["visible"] = False
             encoded_layers.append(entry)
@@ -90,6 +97,8 @@ def save_nbx(layers):
             "palette": palette_out,
             "layers": encoded_layers,
         }
+        if custom_colors:
+            data["custom_colors"] = custom_colors
     else:
         encoded_layers = []
         for layer in layers:
@@ -99,6 +108,9 @@ def save_nbx(layers):
                 "front": _encode_grid(layer["front"], _encode_row_inline),
                 "side": _encode_grid(layer["side"], _encode_row_inline),
             }
+            for rk in REVERSE_KEYS:
+                if layer.get(rk):
+                    entry[rk] = _encode_grid(layer[rk], _encode_row_inline)
             if not layer.get("visible", True):
                 entry["visible"] = False
             encoded_layers.append(entry)
@@ -108,6 +120,8 @@ def save_nbx(layers):
             "type": "inline",
             "layers": encoded_layers,
         }
+        if custom_colors:
+            data["custom_colors"] = custom_colors
 
     return json.dumps(data, indent=2)
 
@@ -165,6 +179,7 @@ def _decode_grid(rows, decode_fn):
 
 def load_nbx(json_str):
     data = json.loads(json_str)
+    custom_colors = data.get("custom_colors", None)
 
     if data["type"] == "indexed":
         reverse_palette = data["palette"]
@@ -175,16 +190,20 @@ def load_nbx(json_str):
     if "layers" in data:
         layers = []
         for layer_data in data["layers"]:
-            layers.append({
+            layer = {
                 "name": layer_data.get("name", f"Layer {len(layers) + 1}"),
                 "visible": layer_data.get("visible", True),
                 "top": _decode_grid(layer_data["top"], decode_fn),
                 "front": _decode_grid(layer_data["front"], decode_fn),
                 "side": _decode_grid(layer_data["side"], decode_fn),
-            })
-        return layers
+            }
+            for rk in ("bottom", "back", "right"):
+                layer[rk] = _decode_grid(layer_data[rk], decode_fn) if rk in layer_data else {}
+            layers.append(layer)
+        return layers, custom_colors
 
     return [{"name": "Layer 1",
              "top": _decode_grid(data["top"], decode_fn),
              "front": _decode_grid(data["front"], decode_fn),
-             "side": _decode_grid(data["side"], decode_fn)}]
+             "side": _decode_grid(data["side"], decode_fn),
+             "bottom": {}, "back": {}, "right": {}}], custom_colors

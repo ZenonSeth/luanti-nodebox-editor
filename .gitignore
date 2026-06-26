@@ -7,3 +7,6 @@ settings.json
 # PyInstaller
 build/
 dist/
+
+# Local notes
+ignored/

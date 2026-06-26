@@ -1,4 +1,5 @@
 import png
+from voxels import _has_node_pixels, _effective_reverse
 
 NODE_START = 16
 NODE_END = 48
@@ -36,7 +37,7 @@ def grid_to_png(grid, path):
                 r, g, b = hex_to_rgb(color)
                 row.extend([r, g, b, 255])
             else:
-                row.extend([0, 0, 0, 0])
+                row.extend([0, 0, 0, 255])
         rows.append(row)
     writer = png.Writer(width=TEXTURE_SIZE, height=TEXTURE_SIZE, alpha=True, greyscale=False)
     with open(path, "wb") as f:
@@ -64,10 +65,22 @@ def png_to_grid(path):
     return grid
 
 
+_OPPOSITE_PRIMARY = {"back": "front", "right": "side", "bottom": "top"}
+
+
 def layers_to_png(layers, view, path):
+    primary_key = _OPPOSITE_PRIMARY.get(view)
+    if primary_key is not None:
+        any_opposite = any(_has_node_pixels(l.get(view, {})) for l in layers if l.get("visible", True))
+    else:
+        any_opposite = False
+
     composite = {}
     for layer in reversed(layers):
         if not layer.get("visible", True):
             continue
-        composite.update(layer[view])
+        if any_opposite:
+            composite.update(_effective_reverse(layer[primary_key], layer.get(view, {})))
+        else:
+            composite.update(layer[view])
     return grid_to_png(composite, path)

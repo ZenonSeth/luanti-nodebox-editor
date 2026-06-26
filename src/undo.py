@@ -11,14 +11,20 @@ def _snap(layers, active_idx):
         dict(layer["top"]),
         dict(layer["front"]),
         dict(layer["side"]),
+        dict(layer.get("bottom", {})),
+        dict(layer.get("back", {})),
+        dict(layer.get("right", {})),
     )
 
 
 def _restore(layers, grids, snap, select_layer_fn):
-    idx, top, front, side = snap
+    idx, top, front, side, bottom, back, right = snap
     layers[idx]["top"] = top
     layers[idx]["front"] = front
     layers[idx]["side"] = side
+    layers[idx]["bottom"] = bottom
+    layers[idx]["back"] = back
+    layers[idx]["right"] = right
     select_layer_fn(idx)
 
 

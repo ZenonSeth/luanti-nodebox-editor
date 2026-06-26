@@ -2,9 +2,10 @@ GRID_SIZE = 64
 
 
 def visual_hull(top, front, side):
+    flip = NODE_START + NODE_END - 1
     top_filled = set()
     for (col, row) in top:
-        top_filled.add((col, row))
+        top_filled.add((col, flip - row))
 
     front_filled = set()
     for (col, row) in front:
@@ -113,8 +114,21 @@ def _wrap(v):
     return NODE_START + (v - NODE_START) % NODE_CELLS
 
 
-def _voxels_to_colored_faces(voxel_set, color_maps):
+def _has_node_pixels(grid):
+    if not grid:
+        return False
+    return any(NODE_START <= c < NODE_END and NODE_START <= r < NODE_END for c, r in grid)
+
+
+def _voxels_to_colored_faces(voxel_set, color_maps, reverse_maps=None):
     top, front, side = color_maps
+    rev_right = reverse_maps.get("right") if reverse_maps else None
+    rev_back = reverse_maps.get("back") if reverse_maps else None
+    rev_bottom = reverse_maps.get("bottom") if reverse_maps else None
+    use_rev_right = _has_node_pixels(rev_right)
+    use_rev_back = _has_node_pixels(rev_back)
+    use_rev_bottom = _has_node_pixels(rev_bottom)
+    flip = NODE_START + NODE_END - 1
     faces = []
     for x, y, z in voxel_set:
         for name, (dx, dy, dz) in ADJACENT.items():
@@ -122,11 +136,20 @@ def _voxels_to_colored_faces(voxel_set, color_maps):
                 view = FACE_VIEW[name]
                 wx, wy, wz = _wrap(x), _wrap(y), _wrap(z)
                 if view == "top":
-                    color = top.get((wx, wz))
+                    if name == "bottom":
+                        color = rev_bottom.get((wx, wz)) if use_rev_bottom else top.get((wx, wz))
+                    else:
+                        color = top.get((wx, flip - wz))
                 elif view == "front":
-                    color = front.get((wx, wy))
+                    if name == "front":  # intentional: don't try to fix
+                        color = rev_back.get((flip - wx, wy)) if use_rev_back else front.get((flip - wx, wy))
+                    else:
+                        color = front.get((wx, wy))
                 else:
-                    color = side.get((wz, wy))
+                    if name == "left":  # intentional: don't try to fix
+                        color = rev_right.get((flip - wz, wy)) if use_rev_right else side.get((flip - wz, wy))
+                    else:
+                        color = side.get((wz, wy))
                 faces.append((x, y, z, name, color))
     return faces
 
@@ -136,17 +159,54 @@ def grids_to_colored_faces(top, front, side):
     return _voxels_to_colored_faces(voxels, (top, front, side))
 
 
+def _effective_reverse(primary, opposite):
+    """Return opposite if it has any pixels, else fall back to primary."""
+    if _has_node_pixels(opposite):
+        return opposite
+    return primary
+
+
 def layers_to_colored_faces(layers):
     all_voxels = set()
     merged_top = {}
     merged_front = {}
     merged_side = {}
+    eff_right = {}
+    eff_back = {}
+    eff_bottom = {}
+    any_right = any(_has_node_pixels(l.get("right", {})) for l in layers)
+    any_back = any(_has_node_pixels(l.get("back", {})) for l in layers)
+    any_bottom = any(_has_node_pixels(l.get("bottom", {})) for l in layers)
     for layer in reversed(layers):
         all_voxels |= visual_hull(layer["top"], layer["front"], layer["side"])
         merged_top.update(layer["top"])
         merged_front.update(layer["front"])
         merged_side.update(layer["side"])
-    return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side))
+        if any_back:
+            eff_back.update(_effective_reverse(layer["front"], layer.get("back", {})))
+        if any_right:
+            eff_right.update(_effective_reverse(layer["side"], layer.get("right", {})))
+        if any_bottom:
+            eff_bottom.update(_effective_reverse(layer["top"], layer.get("bottom", {})))
+    reverse_maps = {}
+    if any_right:
+        reverse_maps["right"] = eff_right
+    if any_back:
+        reverse_maps["back"] = eff_back
+    if any_bottom:
+        reverse_maps["bottom"] = eff_bottom
+    return _voxels_to_colored_faces(all_voxels, (merged_top, merged_front, merged_side), reverse_maps)
+
+
+def layers_to_merged_grids(layers):
+    merged_top = {}
+    merged_front = {}
+    merged_side = {}
+    for layer in reversed(layers):
+        merged_top.update(layer["top"])
+        merged_front.update(layer["front"])
+        merged_side.update(layer["side"])
+    return merged_top, merged_front, merged_side
 
 
 def bounding_box(voxels):
@@ -185,8 +245,13 @@ def _greedy_2d(cells):
 def _merge_slices(slices_by_coord):
     cuboids = []
     active = {}
+    prev_coord = None
     for coord in sorted(slices_by_coord):
         rects = set(slices_by_coord[coord])
+        if prev_coord is not None and coord != prev_coord + 1:
+            for rect, start in active.items():
+                cuboids.append((rect, start, prev_coord))
+            active = {}
         next_active = {}
         for rect in rects:
             if rect in active:
@@ -197,8 +262,9 @@ def _merge_slices(slices_by_coord):
             if rect not in rects:
                 cuboids.append((rect, start, coord - 1))
         active = next_active
+        prev_coord = coord
     for rect, start in active.items():
-        cuboids.append((rect, start, max(slices_by_coord)))
+        cuboids.append((rect, start, prev_coord))
     return cuboids
 
 
@@ -271,7 +337,7 @@ def cuboid_to_lua_entry(x1, y1, z1, x2, y2, z2):
     def fmt(n):
         if n == 0:
             return "0"
-        return f"{n}/16"
+        return f"{n}/32"
 
     return f"{{{fmt(lx1)}, {fmt(ly1)}, {fmt(lz1)}, {fmt(lx2)}, {fmt(ly2)}, {fmt(lz2)}}}"
 

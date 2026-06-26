@@ -1,6 +1,11 @@
-# Luanti Nodebox Editor
+# Luanti Nodebox & Texture Editor
 
-A visual editor for creating [Luanti](https://www.luanti.org/) node box definitions by painting on three orthogonal 2D grid views. The intersection of the three projections (a visual hull) defines a 3D voxel shape, which is automatically decomposed into minimal axis-aligned cuboids for Lua output.
+A visual editor for creating [Luanti](https://www.luanti.org/) node box definitions and textures by painting on three orthogonal 2D grid views. 
+
+The intersection of the three projections, like shadows on the walls, (a visual hull) defines a 3D voxel shape which is created from them and then is automatically decomposed into minimal nodeboxes for Lua output. Painted colors can be exported as PNG textures for each face as well.
+
+![Nodebox Editor screenshot](https://github.com/user-attachments/assets/80aeb3eb-8e47-4c45-9e92-fb464333baef)
+_Note that in screenshot above the arms of the cactus are in the 2nd layer, which is why they're not visible in texture painter_
 
 ## How it works
 
@@ -19,6 +24,10 @@ Each grid is 64x64 pixels. The center 32x32 region represents the node itself (1
 - Texture export to PNG for each face direction
 - Undo/redo support
 - Save/load projects in the .nbx format
+
+## Info
+
+![Help dialog screenshot](https://github.com/user-attachments/assets/b926d4f1-f83e-4f1f-9868-c69937a68683)
 
 ## Controls
 
@@ -44,7 +53,7 @@ Pre-built standalone executables (no Python required) are available on the
 Requires Python 3.10+ and pypng (https://pypi.org/project/pypng/):
 
     pip install pypng
-    python main.py
+    python src/main.py
 
 ### Packaging with PyInstaller
 
