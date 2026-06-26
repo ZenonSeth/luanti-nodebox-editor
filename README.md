@@ -3,6 +3,7 @@
 A visual editor for creating [Luanti](https://www.luanti.org/) node box definitions and textures by painting on three orthogonal 2D grid views. The intersection of the three projections (a visual hull) defines a 3D voxel shape, which is automatically decomposed into minimal axis-aligned cuboids for Lua output. Painted colors are exported as PNG textures for each face.
 
 ![Nodebox Editor screenshot](https://github.com/user-attachments/assets/80aeb3eb-8e47-4c45-9e92-fb464333baef)
+_Note that in screenshot above the arms of the cactus are in the 2nd layer, which is why they're not visible in texture painter_
 
 ## How it works
 
