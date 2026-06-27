@@ -57,6 +57,22 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
 
+_SRGB_TO_LINEAR = [
+    ((i / 255.0) / 12.92) if (i / 255.0) <= 0.04045
+    else (((i / 255.0) + 0.055) / 1.055) ** 2.4
+    for i in range(256)
+]
+
+
+def _color_distance(hex1, hex2):
+    r1, g1, b1 = int(hex1[1:3], 16), int(hex1[3:5], 16), int(hex1[5:7], 16)
+    r2, g2, b2 = int(hex2[1:3], 16), int(hex2[3:5], 16), int(hex2[5:7], 16)
+    dr = _SRGB_TO_LINEAR[r1] - _SRGB_TO_LINEAR[r2]
+    dg = _SRGB_TO_LINEAR[g1] - _SRGB_TO_LINEAR[g2]
+    db = _SRGB_TO_LINEAR[b1] - _SRGB_TO_LINEAR[b2]
+    return (2 * dr*dr + 4 * dg*dg + 3 * db*db) ** 0.5
+
+
 TARGET_RATIO = 16 / 9
 GRID_SIZE = 64
 NODE_START = 16
@@ -114,6 +130,9 @@ def build_palette():
 selected_color = None
 color_indicator = None
 current_tool = "pencil"
+fill_tolerance = 0.0
+fill_noise_enabled = False
+fill_noise_amount = 0.1
 current_symmetry = "None"
 TOOL_CURSORS = {"pencil": "pencil", "fill": "target"}
 
@@ -314,10 +333,12 @@ def set_color(color):
     save_settings(settings)
 
 
-def _apply_noise(hex_color):
+def _apply_noise(hex_color, amount=None):
+    if amount is None:
+        amount = noise_amount
     r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
     h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
-    l = max(0.0, min(1.0, l + random.uniform(-noise_amount, noise_amount)))
+    l = max(0.0, min(1.0, l + random.uniform(-amount, amount)))
     nr, ng, nb = colorsys.hls_to_rgb(h, l, s)
     return f"#{int(nr * 255):02x}{int(ng * 255):02x}{int(nb * 255):02x}"
 
@@ -340,7 +361,7 @@ def on_pick_color(event):
         set_color(color)
 
 
-def flood_fill(grid, view_name, col, row, erase=False):
+def flood_fill(grid, view_name, col, row, erase=False, tolerance=0.0):
     target_color = grid.get((col, row))
     inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
     if erase:
@@ -363,15 +384,24 @@ def flood_fill(grid, view_name, col, row, erase=False):
             continue
         visited.add((c, r))
         cell_color = grid.get((c, r))
-        if cell_color != target_color:
-            continue
+        if target_color is None:
+            if cell_color is not None:
+                continue
+        else:
+            if cell_color is None:
+                continue
+            if cell_color != target_color and (tolerance == 0.0 or _color_distance(cell_color, target_color) > tolerance):
+                continue
         in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
         if in_node != inside_click:
             continue
         if erase:
             grid.pop((c, r), None)
         else:
-            grid[(c, r)] = fill_color if in_node else "#000000"
+            cell_fill = fill_color if in_node else "#000000"
+            if fill_noise_enabled and in_node:
+                cell_fill = _apply_noise(cell_fill, fill_noise_amount)
+            grid[(c, r)] = cell_fill
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nc, nr = c + dc, r + dr
             if 0 <= nc < GRID_SIZE and 0 <= nr < GRID_SIZE:
@@ -402,7 +432,7 @@ def on_click(event, mode="draw"):
     grid = grids[view_name]
     if mode == "draw":
         if current_tool == "fill":
-            flood_fill(grid, view_name, col, row)
+            flood_fill(grid, view_name, col, row, tolerance=fill_tolerance)
         else:
             for c, r in _symmetry_cells(col, row):
                 color = _resolve_fill_color(view_name, c, r)
@@ -782,6 +812,56 @@ def main():
     noise_check.pack(side=tk.LEFT)
     add_tooltip(noise_check, "Apply random lightness jitter per pixel while drawing")
 
+    fill_frame = tk.Frame(tool_section, bg="#333333")
+    fill_frame.pack()
+
+    tk.Label(fill_frame, text="Tolerance:", bg="#333333", fg="#cccccc").pack(side=tk.LEFT, padx=(0, 4))
+
+    fill_tolerance_var = tk.IntVar(value=0)
+    fill_tolerance_slider = tk.Scale(fill_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                     variable=fill_tolerance_var, length=100, showvalue=True,
+                                     bg="#333333", fg="#cccccc", highlightthickness=0,
+                                     troughcolor="#555555", activebackground="#aaaaaa")
+
+    def on_fill_tolerance_slider(*_):
+        global fill_tolerance
+        fill_tolerance = fill_tolerance_var.get() / 100.0 * 3.0
+
+    fill_tolerance_slider.configure(command=on_fill_tolerance_slider)
+    fill_tolerance_slider.pack(side=tk.LEFT, padx=(2, 0))
+
+    tk.Label(fill_frame, text="|", bg="#333333", fg="#555555").pack(side=tk.LEFT, padx=6)
+
+    fill_noise_var = tk.BooleanVar(value=False)
+    fill_noise_slider_var = tk.IntVar(value=10)
+    fill_noise_slider = tk.Scale(fill_frame, from_=1, to=30, orient=tk.HORIZONTAL,
+                                 variable=fill_noise_slider_var, length=70, showvalue=False,
+                                 bg="#333333", fg="#cccccc", highlightthickness=0,
+                                 troughcolor="#555555", activebackground="#aaaaaa")
+
+    def on_fill_noise_slider(*_):
+        global fill_noise_amount
+        fill_noise_amount = fill_noise_slider_var.get() / 100.0
+
+    fill_noise_slider.configure(command=on_fill_noise_slider)
+
+    def on_fill_noise_toggle(*_):
+        global fill_noise_enabled
+        fill_noise_enabled = fill_noise_var.get()
+        if fill_noise_enabled:
+            fill_noise_slider.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            fill_noise_slider.pack_forget()
+
+    fill_noise_check = tk.Checkbutton(fill_frame, text="Noise", variable=fill_noise_var,
+                                      bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                      activebackground="#333333", activeforeground="#cccccc",
+                                      command=on_fill_noise_toggle)
+    fill_noise_check.pack(side=tk.LEFT)
+    add_tooltip(fill_noise_check, "Apply random lightness jitter per pixel while filling")
+
+    fill_frame.pack_forget()
+
     def set_tool(tool):
         global current_tool
         current_tool = tool
@@ -792,8 +872,10 @@ def main():
             view.configure(cursor=cursor)
         if tool == "pencil":
             symmetry_frame.pack()
+            fill_frame.pack_forget()
         else:
             symmetry_frame.pack_forget()
+            fill_frame.pack()
 
     tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)"}
     tool_buttons = {}
