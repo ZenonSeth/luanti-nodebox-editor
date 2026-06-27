@@ -342,13 +342,13 @@ def on_pick_color(event):
 
 def flood_fill(grid, view_name, col, row, erase=False):
     target_color = grid.get((col, row))
+    inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
     if erase:
         if target_color is None:
             return
     else:
         # Intended fill color is always selected_color (or layer override for inside cells),
         # regardless of whether the click started inside or outside node bounds.
-        inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
         if inside_click and _active_layer_idx != 0 and _layers:
             fill_color = _layers[0][view_name].get((col, row), selected_color)
         else:
@@ -365,11 +365,13 @@ def flood_fill(grid, view_name, col, row, erase=False):
         cell_color = grid.get((c, r))
         if cell_color != target_color:
             continue
+        in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+        if in_node != inside_click:
+            continue
         if erase:
             grid.pop((c, r), None)
         else:
-            in_bounds = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
-            grid[(c, r)] = fill_color if in_bounds else "#000000"
+            grid[(c, r)] = fill_color if in_node else "#000000"
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nc, nr = c + dc, r + dr
             if 0 <= nc < GRID_SIZE and 0 <= nr < GRID_SIZE:
