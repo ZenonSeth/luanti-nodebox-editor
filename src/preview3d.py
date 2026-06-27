@@ -37,6 +37,24 @@ BASE_COLOR = (90, 145, 185)
 WIREFRAME_COLOR = "#888888"
 REF_CUBE_COLOR = "#444444"
 
+_sort_cache_voxel_faces_id = None
+_sort_cache_zone = None
+_sort_cache_sorted_voxels = None
+
+
+def _view_zone(vx, vy, vz):
+    ax, ay, az = abs(vx), abs(vy), abs(vz)
+    sx = 1 if vx >= 0 else -1
+    sy = 1 if vy >= 0 else -1
+    sz = 1 if vz >= 0 else -1
+    if ax >= ay and ax >= az:
+        order = 0 if ay >= az else 1
+    elif ay >= ax and ay >= az:
+        order = 2 if ax >= az else 3
+    else:
+        order = 4 if ax >= ay else 5
+    return (order, sx, sy, sz)
+
 
 def _shade_color(r, g, b, factor):
     return f"#{int(r * factor):02x}{int(g * factor):02x}{int(b * factor):02x}"
@@ -152,9 +170,16 @@ def render_preview(canvas, voxel_faces, azimuth=None, elevation=None, backdrop_g
     if not voxel_faces:
         return
 
-    # Sort voxels by depth key (integer positions, back-to-front = decreasing depth)
-    # depth(x,y,z) = vx*x + vy*y + vz*z  (linear, so voxel position is sufficient)
-    sorted_voxels = sorted(voxel_faces, key=lambda p: -(vx * p[0] + vy * p[1] + vz * p[2]))
+    global _sort_cache_voxel_faces_id, _sort_cache_zone, _sort_cache_sorted_voxels
+
+    zone = _view_zone(vx, vy, vz)
+    if id(voxel_faces) == _sort_cache_voxel_faces_id and zone == _sort_cache_zone:
+        sorted_voxels = _sort_cache_sorted_voxels
+    else:
+        sorted_voxels = sorted(voxel_faces, key=lambda p: -(vx * p[0] + vy * p[1] + vz * p[2]))
+        _sort_cache_voxel_faces_id = id(voxel_faces)
+        _sort_cache_zone = zone
+        _sort_cache_sorted_voxels = sorted_voxels
 
     dr, dg, db = BASE_COLOR
 
