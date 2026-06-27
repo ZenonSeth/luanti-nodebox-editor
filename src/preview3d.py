@@ -75,7 +75,7 @@ def _draw_backdrop_cells(canvas, grid, verts_fn, project):
 
 
 
-def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=None, zoom=1.0):
+def render_preview(canvas, voxel_faces, azimuth=None, elevation=None, backdrop_grids=None, zoom=1.0):
     canvas.delete("all")
 
     w = canvas.winfo_width()
@@ -149,21 +149,8 @@ def render_preview(canvas, faces, azimuth=None, elevation=None, backdrop_grids=N
                               (col+1, fy, row+1), (col, fy, row+1)],
             project)
 
-    if not faces:
+    if not voxel_faces:
         return
-
-    # Group faces by voxel position
-    voxel_faces = {}
-    for face in faces:
-        if len(face) == 5:
-            fx, fy, fz, name, color = face
-        else:
-            fx, fy, fz, name = face
-            color = None
-        key = (fx, fy, fz)
-        if key not in voxel_faces:
-            voxel_faces[key] = []
-        voxel_faces[key].append((name, color))
 
     # Sort voxels by depth key (integer positions, back-to-front = decreasing depth)
     # depth(x,y,z) = vx*x + vy*y + vz*z  (linear, so voxel position is sufficient)

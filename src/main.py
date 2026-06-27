@@ -226,6 +226,7 @@ preview_azimuth = 35
 preview_elevation = 25
 preview_zoom = 1.0
 cached_faces = []
+cached_voxel_faces = {}
 cached_backdrop_grids = None
 show_shadows = False
 show_model = True
@@ -256,15 +257,32 @@ def _visible_layers():
     return [l for l in _layers if l.get("visible", True)]
 
 
+def _group_faces(faces):
+    voxel_faces = {}
+    for face in faces:
+        if len(face) == 5:
+            fx, fy, fz, name, color = face
+        else:
+            fx, fy, fz, name = face
+            color = None
+        key = (fx, fy, fz)
+        if key not in voxel_faces:
+            voxel_faces[key] = []
+        voxel_faces[key].append((name, color))
+    return voxel_faces
+
+
 def rebuild_faces():
-    global cached_faces, cached_backdrop_grids
+    global cached_faces, cached_voxel_faces, cached_backdrop_grids
     vis = _visible_layers()
     if vis:
         cached_faces = layers_to_colored_faces(vis)
+        cached_voxel_faces = _group_faces(cached_faces)
         mt, mf, ms = layers_to_merged_grids(vis)
         cached_backdrop_grids = {"top": mt, "front": mf, "side": ms}
     else:
         cached_faces = []
+        cached_voxel_faces = {}
         cached_backdrop_grids = None
     redraw_preview()
 
@@ -273,7 +291,7 @@ def redraw_preview():
     if preview_canvas is None:
         return
     render_preview(preview_canvas,
-                   cached_faces if show_model else [],
+                   cached_voxel_faces if show_model else {},
                    preview_azimuth, preview_elevation,
                    backdrop_grids=cached_backdrop_grids if show_shadows else None,
                    zoom=preview_zoom)
