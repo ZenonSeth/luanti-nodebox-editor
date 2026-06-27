@@ -33,7 +33,7 @@ jobs:
 
       - name: Package
         run: |
-          VERSION=${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}
+          VERSION=${{ github.event.inputs.version || github.ref_name }}
           mv dist/nodebox-editor dist/nodebox-editor-macos-${VERSION}
           cd dist
           zip -r nodebox-editor-macos-${VERSION}.zip nodebox-editor-macos-${VERSION}
