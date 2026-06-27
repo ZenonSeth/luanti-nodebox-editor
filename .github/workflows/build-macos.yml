@@ -1,0 +1,45 @@
+name: Build macOS
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to attach the artifact to (e.g. v0.8.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
+          pip install pypng
+
+      - name: Build with PyInstaller
+        run: pyinstaller nodebox_editor.spec
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}
+          mv dist/nodebox-editor dist/nodebox-editor-macos-${VERSION}
+          cd dist
+          zip -r nodebox-editor-macos-${VERSION}.zip nodebox-editor-macos-${VERSION}
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          files: dist/nodebox-editor-macos-*.zip

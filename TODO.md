@@ -1,13 +1,9 @@
 ## Onboarding
 
-- [ ] Tutorial popup: image-based walkthrough showing how the three views
+- [x] Tutorial popup: image-based walkthrough showing how the three views
       combine into a 3D shape. Shows on first launch with "Don't show again"
       checkbox. Also accessible from Help/About menu.
-      - Make annotated PNG screenshots for each step
-      - Optimize with pngquant (indexed colors) + optipng -o7 for small size
-      - Base64 encode and store in src/tutorial_images.py
-      - Load in popup via tkinter PhotoImage
-- [ ] Baked-in starter model: load a simple example (e.g. chair) on first
+- [x] Baked-in starter model: load a simple example (e.g. chair) on first
       launch so users see a working model instead of empty grids
 
 ## Planned features
@@ -28,6 +24,10 @@
       for the amount of variation.
 
 ## Future features
+
+- [ ] .obj export: export each layer as its own mesh with its own material/texture,
+      avoiding the layer compositing limitation of the nodebox format. Each face
+      needs correct UV mapping into the layer's texture.
 
 - [x] Import PNG texture: load a 32x32 PNG into any of the three 2D views,
       mapping pixel colors to grid cells (fills the node region only)
