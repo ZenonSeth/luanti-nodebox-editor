@@ -134,7 +134,10 @@ fill_tolerance = 0.0
 fill_noise_enabled = False
 fill_noise_amount = 0.1
 current_symmetry = "None"
-TOOL_CURSORS = {"pencil": "pencil", "fill": "target"}
+TOOL_CURSORS = {"pencil": "pencil", "fill": "target", "rect": "crosshair", "ellipse": "crosshair"}
+shape_draw_outline = True
+shape_draw_fill = False
+_shape_drag_start = None
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -374,7 +377,7 @@ def flood_fill(grid, view_name, col, row, erase=False, tolerance=0.0):
             fill_color = _layers[0][view_name].get((col, row), selected_color)
         else:
             fill_color = selected_color
-        if target_color == fill_color:
+        if target_color == fill_color and not fill_noise_enabled:
             return
     stack = [(col, row)]
     visited = set()
@@ -420,12 +423,72 @@ def _symmetry_cells(col, row):
     return [(col, row)]
 
 
+def _rect_cells(c1, r1, c2, r2):
+    if c1 > c2: c1, c2 = c2, c1
+    if r1 > r2: r1, r2 = r2, r1
+    cells = set()
+    for c in range(c1, c2 + 1):
+        for r in range(r1, r2 + 1):
+            on_border = (c == c1 or c == c2 or r == r1 or r == r2)
+            if on_border and shape_draw_outline:
+                cells.add((c, r))
+            elif not on_border and shape_draw_fill:
+                cells.add((c, r))
+    return cells
+
+
+def _ellipse_cells(c1, r1, c2, r2):
+    if c1 > c2: c1, c2 = c2, c1
+    if r1 > r2: r1, r2 = r2, r1
+    cx = (c1 + c2 + 1) / 2.0
+    cy = (r1 + r2 + 1) / 2.0
+    a = (c2 - c1 + 1) / 2.0
+    b = (r2 - r1 + 1) / 2.0
+
+    def inside(c, r):
+        dx = (c + 0.5 - cx) / a
+        dy = (r + 0.5 - cy) / b
+        return dx * dx + dy * dy <= 1.0
+
+    cells = set()
+    for c in range(c1, c2 + 1):
+        for r in range(r1, r2 + 1):
+            if inside(c, r):
+                if shape_draw_fill:
+                    cells.add((c, r))
+                elif shape_draw_outline:
+                    for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        if not inside(c + dc, r + dr):
+                            cells.add((c, r))
+                            break
+    return cells
+
+
+def _shape_cells(c1, r1, c2, r2):
+    if current_tool == "rect":
+        return _rect_cells(c1, r1, c2, r2)
+    return _ellipse_cells(c1, r1, c2, r2)
+
+
+def _draw_shape_preview(canvas, c1, r1, c2, r2):
+    offset_x, offset_y, size, cell, view_start, view_end = get_grid_params(canvas)
+    for (c, r) in _shape_cells(c1, r1, c2, r2):
+        if view_start <= c < view_end and view_start <= r < view_end:
+            x1 = offset_x + (c - view_start) * cell
+            y1 = offset_y + (r - view_start) * cell
+            canvas.create_rectangle(x1, y1, x1 + cell, y1 + cell,
+                                    fill=selected_color, outline="", tags="shape_preview")
+
+
 def on_click(event, mode="draw"):
-    global _last_drag_cell
+    global _last_drag_cell, _shape_drag_start
     _last_drag_cell = None
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
+        return
+    if current_tool in ("rect", "ellipse"):
+        _shape_drag_start = (canvas, col, row, mode)
         return
     undo_push()
     view_name = canvas_to_name[canvas]
@@ -456,6 +519,15 @@ def on_drag(event, mode="draw"):
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
         return
+    if current_tool in ("rect", "ellipse"):
+        if _shape_drag_start is None or _shape_drag_start[0] is not canvas:
+            return
+        if (col, row) == _last_drag_cell:
+            return
+        _last_drag_cell = (col, row)
+        draw_grid(canvas)
+        _draw_shape_preview(canvas, _shape_drag_start[1], _shape_drag_start[2], col, row)
+        return
     if (col, row) == _last_drag_cell:
         return
     _last_drag_cell = (col, row)
@@ -479,6 +551,41 @@ def on_drag(event, mode="draw"):
         mark_dirty()
         draw_grid(canvas)
         update_preview()
+
+
+def on_release(event, mode="draw"):
+    global _shape_drag_start
+    if current_tool not in ("rect", "ellipse") or _shape_drag_start is None:
+        return
+    canvas = event.widget
+    if _shape_drag_start[0] is not canvas:
+        return
+    sc, sr, drag_mode = _shape_drag_start[1], _shape_drag_start[2], _shape_drag_start[3]
+    col, row = pixel_to_cell(canvas, event.x, event.y)
+    if col is None:
+        col, row = _last_drag_cell or (sc, sr)
+    _shape_drag_start = None
+    undo_push()
+    view_name = canvas_to_name[canvas]
+    grid = grids[view_name]
+    inside_click = NODE_START <= sc < NODE_END and NODE_START <= sr < NODE_END
+    cells = _shape_cells(sc, sr, col, row)
+    if drag_mode == "draw":
+        for c, r in cells:
+            in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+            if in_node != inside_click:
+                continue
+            color = _resolve_fill_color(view_name, c, r)
+            grid[(c, r)] = color
+    else:
+        for c, r in cells:
+            in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+            if in_node != inside_click:
+                continue
+            grid.pop((c, r), None)
+    mark_dirty()
+    draw_grid(canvas)
+    update_preview()
 
 
 def main():
@@ -862,6 +969,38 @@ def main():
 
     fill_frame.pack_forget()
 
+    shape_frame = tk.Frame(tool_section, bg="#333333")
+    shape_frame.pack()
+
+    shape_outline_var = tk.BooleanVar(value=True)
+    shape_fill_var = tk.BooleanVar(value=False)
+
+    def on_shape_outline_toggle(*_):
+        global shape_draw_outline
+        shape_draw_outline = shape_outline_var.get()
+        if not shape_draw_outline and not shape_draw_fill:
+            shape_fill_var.set(True)
+            on_shape_fill_toggle()
+
+    def on_shape_fill_toggle(*_):
+        global shape_draw_fill
+        shape_draw_fill = shape_fill_var.get()
+        if not shape_draw_outline and not shape_draw_fill:
+            shape_outline_var.set(True)
+            on_shape_outline_toggle()
+
+    shape_outline_check = tk.Checkbutton(shape_frame, text="Outline", variable=shape_outline_var,
+                                         bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                         activebackground="#333333", activeforeground="#cccccc",
+                                         command=on_shape_outline_toggle)
+    shape_outline_check.pack(side=tk.LEFT)
+    shape_fill_check = tk.Checkbutton(shape_frame, text="Fill", variable=shape_fill_var,
+                                      bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                      activebackground="#333333", activeforeground="#cccccc",
+                                      command=on_shape_fill_toggle)
+    shape_fill_check.pack(side=tk.LEFT)
+    shape_frame.pack_forget()
+
     def set_tool(tool):
         global current_tool
         current_tool = tool
@@ -873,13 +1012,20 @@ def main():
         if tool == "pencil":
             symmetry_frame.pack()
             fill_frame.pack_forget()
-        else:
+            shape_frame.pack_forget()
+        elif tool == "fill":
             symmetry_frame.pack_forget()
             fill_frame.pack()
+            shape_frame.pack_forget()
+        else:
+            symmetry_frame.pack_forget()
+            fill_frame.pack_forget()
+            shape_frame.pack()
 
-    tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)"}
+    tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)",
+                     "rect": "Rectangle Tool (R)", "ellipse": "Ellipse Tool (E)"}
     tool_buttons = {}
-    for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill")):
+    for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill"), ("rect", "Rect"), ("ellipse", "Ellipse")):
         btn = tk.Button(tool_frame, text=label, width=7,
                         command=lambda t=tool_name: set_tool(t))
         btn.pack(side=tk.LEFT, padx=2)
@@ -1438,7 +1584,7 @@ def main():
     controls_text = (
         "LMB / drag: Draw   RMB / drag: Erase\n"
         "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo\n"
-        "Y: Pencil tool   F: Fill tool   S: Cycle symmetry"
+        "Y: Pencil   F: Fill   R: Rect   E: Ellipse   S: Cycle symmetry"
     )
     controls_label = tk.Label(left_panel, text=controls_text, bg="#333333",
                               fg="#cccccc", font=("TkDefaultFont", 11),
@@ -1494,8 +1640,10 @@ def main():
         view.bind("<Configure>", on_canvas_resize)
         view.bind("<Button-1>", lambda e: on_click(e, "draw"))
         view.bind("<B1-Motion>", lambda e: on_drag(e, "draw"))
+        view.bind("<ButtonRelease-1>", lambda e: on_release(e, "draw"))
         view.bind("<Button-3>", lambda e: on_click(e, "erase"))
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
+        view.bind("<ButtonRelease-3>", lambda e: on_release(e, "erase"))
         view.bind("<Alt-Button-1>", on_pick_color)
         view.bind("<Alt-B1-Motion>", on_pick_color)
         view.bind("<Motion>", on_hover)
@@ -1522,6 +1670,8 @@ def main():
     root.bind("<Control-o>", lambda e: do_load())
     root.bind("y", lambda e: set_tool("pencil"))
     root.bind("f", lambda e: set_tool("fill"))
+    root.bind("r", lambda e: set_tool("rect"))
+    root.bind("e", lambda e: set_tool("ellipse"))
 
     SYMMETRY_CYCLE = ["None", "Left/Right", "Top/Bottom", "Radial"]
 
