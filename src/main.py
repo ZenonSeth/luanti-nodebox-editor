@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse, cuboids_to_selection_box_lua
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
@@ -1406,7 +1406,7 @@ def main():
                                 outline="#555555", width=1)
 
     def do_export():
-        lua_code, method, count = grids_to_lua_layers(_visible_layers())
+        lua_code, method, count, all_cuboids = grids_to_lua_layers(_visible_layers())
         win = tk.Toplevel(root)
         win.title("Export")
         ew, eh = 540, 960
@@ -1492,33 +1492,70 @@ def main():
         has_bottom = bool(_composite_view("bottom")) and _composite_view("bottom") != _composite_view("top")
         has_back = bool(_composite_view("back")) and _composite_view("back") != _composite_view("front")
         has_right = bool(_composite_view("right")) and _composite_view("right") != _composite_view("side")
-        top_name = "NODENAME_top.png"
-        bottom_name = "NODENAME_bottom.png" if has_bottom else top_name
-        left_name = "NODENAME_left.png"
-        right_name = "NODENAME_right.png" if has_right else left_name
-        front_name = "NODENAME_front.png"
-        back_name = "NODENAME_back.png" if has_back else front_name
-        TILES_DEF = (
-            'tiles = {\n'
-            f'    "{top_name}",\n'
-            f'    "{bottom_name}",\n'
-            f'    "{left_name}",\n'
-            f'    "{right_name}",\n'
-            f'    "{back_name}",\n'
-            f'    "{front_name}",\n'
-            '},\n'
-        )
 
-        include_tiles = tk.BooleanVar(value=False)
+        include_tiles = tk.BooleanVar(value=True)
+        include_selection_box = tk.BooleanVar(value=False)
+        selection_box_lua = cuboids_to_selection_box_lua(all_cuboids)
+        node_name_var = tk.StringVar(value="NODENAME")
 
-        def refresh_code():
+        def _build_tiles_def():
+            prefix = node_name_var.get() or "NODENAME"
+            top_name = f"{prefix}_top.png"
+            left_name = f"{prefix}_left.png"
+            front_name = f"{prefix}_front.png"
+            bottom_name = f"{prefix}_bottom.png" if has_bottom else top_name
+            right_name = f"{prefix}_right.png" if has_right else left_name
+            back_name = f"{prefix}_back.png" if has_back else front_name
+            return (
+                'tiles = {\n'
+                f'    "{top_name}",\n'
+                f'    "{bottom_name}",\n'
+                f'    "{left_name}",\n'
+                f'    "{right_name}",\n'
+                f'    "{back_name}",\n'
+                f'    "{front_name}",\n'
+                '},\n'
+            )
+
+        def refresh_code(*_):
             code = lua_code
+            if include_selection_box.get() and selection_box_lua:
+                code = selection_box_lua + "\n" + code
             if include_tiles.get():
-                code = TILES_DEF + code
+                code = _build_tiles_def() + code
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
             text.insert("1.0", code)
             text.configure(state=tk.DISABLED)
+
+        node_name_var.trace_add("write", refresh_code)
+
+        def export_all_pngs():
+            prefix = node_name_var.get() or "NODENAME"
+            folder = filedialog.askdirectory(title="Export all PNGs to folder", parent=win)
+            if not folder:
+                return
+            import os
+            views_to_export = [("top", "top"), ("front", "front"), ("side", "left")]
+            if has_bottom:
+                views_to_export.append(("bottom", "bottom"))
+            if has_back:
+                views_to_export.append(("back", "back"))
+            if has_right:
+                views_to_export.append(("right", "right"))
+            for view_name, suffix in views_to_export:
+                path = os.path.join(folder, f"{prefix}_{suffix}.png")
+                layers_to_png(_visible_layers(), view_name, path)
+            export_all_btn.configure(text="Exported!")
+            win.after(1500, lambda: export_all_btn.configure(text="Export All PNGs"))
+
+        name_row = tk.Frame(win, bg="#2a2a2a")
+        name_row.pack(fill=tk.X, padx=14, pady=(8, 0))
+        tk.Label(name_row, text="Node name:", bg="#2a2a2a", fg="#cccccc").pack(side=tk.LEFT)
+        tk.Entry(name_row, textvariable=node_name_var, bg="#1a1a1a", fg="#cccccc",
+                 insertbackground="#cccccc", width=24).pack(side=tk.LEFT, padx=(6, 0))
+        export_all_btn = tk.Button(name_row, text="Export All PNGs", command=export_all_pngs)
+        export_all_btn.pack(side=tk.LEFT, padx=(10, 0))
 
         tiles_cb = tk.Checkbutton(win, text="Include tiles definition",
                                   variable=include_tiles, bg="#2a2a2a",
@@ -1526,7 +1563,16 @@ def main():
                                   activebackground="#2a2a2a",
                                   activeforeground="#cccccc",
                                   command=refresh_code)
-        tiles_cb.pack(anchor="w", padx=14, pady=(5, 0))
+        tiles_cb.pack(anchor="w", padx=14, pady=(4, 0))
+
+        sel_box_cb = tk.Checkbutton(win, text="Include bounding selection_box",
+                                    variable=include_selection_box, bg="#2a2a2a",
+                                    fg="#cccccc", selectcolor="#1a1a1a",
+                                    activebackground="#2a2a2a",
+                                    activeforeground="#cccccc",
+                                    command=refresh_code,
+                                    state=tk.NORMAL if selection_box_lua else tk.DISABLED)
+        sel_box_cb.pack(anchor="w", padx=14, pady=(2, 0))
 
         text_frame = tk.Frame(win, bg="#2a2a2a")
         text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 5))
@@ -1537,8 +1583,7 @@ def main():
                        yscrollcommand=text_scroll.set)
         text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         text_scroll.config(command=text.yview)
-        text.insert("1.0", lua_code)
-        text.configure(state=tk.DISABLED)
+        refresh_code()
 
         def get_displayed_code():
             return text.get("1.0", tk.END).rstrip("\n")

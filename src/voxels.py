@@ -357,15 +357,17 @@ def grids_to_lua(top, front, side):
 
 
 def grids_to_lua_layers(layers):
+    all_cuboids = []
     all_entries = []
     methods = []
     for layer in layers:
         cuboids, method = grids_to_cuboids(layer["top"], layer["front"], layer["side"])
         if cuboids:
+            all_cuboids.extend(cuboids)
             all_entries.extend(cuboid_to_lua_entry(*c) for c in cuboids)
             methods.append(method)
     if not all_entries:
-        return "-- No voxels to export", None, 0
+        return "-- No voxels to export", None, 0, []
     method = methods[0] if len(set(methods)) == 1 else "/".join(methods)
     count = len(all_entries)
     if count == 1:
@@ -374,4 +376,17 @@ def grids_to_lua_layers(layers):
         lines = ",\n        ".join(all_entries)
         fixed = f"{{\n        {lines},\n    }}"
     lua = f"node_box = {{\n    type = \"fixed\",\n    fixed = {fixed},\n}}"
-    return lua, method, count
+    return lua, method, count, all_cuboids
+
+
+def cuboids_to_selection_box_lua(cuboids):
+    if not cuboids:
+        return None
+    bx1 = min(c[0] for c in cuboids)
+    by1 = min(c[1] for c in cuboids)
+    bz1 = min(c[2] for c in cuboids)
+    bx2 = max(c[3] for c in cuboids)
+    by2 = max(c[4] for c in cuboids)
+    bz2 = max(c[5] for c in cuboids)
+    entry = cuboid_to_lua_entry(bx1, by1, bz1, bx2, by2, bz2)
+    return f"-- Can also be used for collision_box\nselection_box = {{\n    type = \"fixed\",\n    fixed = {{{entry}}},\n}}"
