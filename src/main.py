@@ -653,6 +653,17 @@ def main():
         draw_grid(name_to_canvas[view_name])
         update_preview()
 
+    def rotate_pixels_cw(view_name):
+        undo_push()
+        grid = grids[view_name]
+        new_grid = {(GRID_SIZE - 1 - r, c): color for (c, r), color in grid.items()}
+        key = _grid_key(view_name)
+        layers[_active_layer_idx][key] = new_grid
+        grids[view_name] = new_grid
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
     def toggle_reverse(view_name):
         view_reverse[view_name] = not view_reverse[view_name]
         grids[view_name] = layers[_active_layer_idx][_grid_key(view_name)]
@@ -697,10 +708,17 @@ def main():
                                    font=("TkDefaultFont", 9), relief=tk.FLAT,
                                    padx=4, pady=0,
                                    command=lambda: do_import_png(view_name))
-        import_png_btn.place(x=4, y=202, anchor="nw")
+        import_png_btn.place(x=4, y=244, anchor="nw")
         flip_lbl = tk.Label(frame, text="Flip", bg="#2a2a2a", fg="#bbbbbb",
                             font=("TkDefaultFont", 9))
         flip_lbl.place(x=4, y=160, anchor="nw")
+        rot_cw_btn = tk.Button(frame, text="Rotate Clockwise",
+                               bg="#3a3a3a", fg="#bbbbbb",
+                               font=("TkDefaultFont", 9), relief=tk.FLAT,
+                               padx=4, pady=0,
+                               command=lambda vn=view_name: rotate_pixels_cw(vn))
+        rot_cw_btn.place(x=4, y=202, anchor="nw")
+
         flip_hor_btn = tk.Button(frame, text="Hor",
                                  bg="#3a3a3a", fg="#bbbbbb",
                                  font=("TkDefaultFont", 9), relief=tk.FLAT,
