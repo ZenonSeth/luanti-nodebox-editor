@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse, cuboids_to_selection_box_lua
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse, cuboids_to_selection_box_lua, import_fixed_boxes_as_layers
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
@@ -90,6 +90,7 @@ BASE_COLORS = [
     (160, 0, 255),
 ]
 GRAY_BASE = (160, 160, 160)
+EGGSHELL_WHITE = "#f0ead6"
 
 
 def lerp(a, b, t):
@@ -1171,8 +1172,45 @@ def main():
     layer_list_frame.pack(fill=tk.X)
     layer_list_frame.pack_propagate(False)
 
-    layer_inner = tk.Frame(layer_list_frame, bg="#1a1a1a")
-    layer_inner.pack(fill=tk.BOTH, expand=True)
+    layer_scrollbar = tk.Scrollbar(layer_list_frame, orient=tk.VERTICAL)
+    layer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    layer_canvas = tk.Canvas(layer_list_frame, bg="#1a1a1a", highlightthickness=0,
+                              yscrollcommand=layer_scrollbar.set)
+    layer_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    layer_scrollbar.config(command=layer_canvas.yview)
+
+    layer_inner = tk.Frame(layer_canvas, bg="#1a1a1a")
+    layer_inner_id = layer_canvas.create_window((0, 0), window=layer_inner, anchor="nw")
+
+    def _on_layer_inner_configure(event):
+        layer_canvas.configure(scrollregion=layer_canvas.bbox("all"))
+
+    layer_inner.bind("<Configure>", _on_layer_inner_configure)
+
+    def _on_layer_canvas_configure(event):
+        layer_canvas.itemconfig(layer_inner_id, width=event.width)
+
+    layer_canvas.bind("<Configure>", _on_layer_canvas_configure)
+
+    def _on_layer_mousewheel(event):
+        if event.num == 5 or event.delta < 0:
+            layer_canvas.yview_scroll(1, "units")
+        else:
+            layer_canvas.yview_scroll(-1, "units")
+
+    def _bind_layer_mousewheel(event):
+        layer_canvas.bind_all("<MouseWheel>", _on_layer_mousewheel)
+        layer_canvas.bind_all("<Button-4>", _on_layer_mousewheel)
+        layer_canvas.bind_all("<Button-5>", _on_layer_mousewheel)
+
+    def _unbind_layer_mousewheel(event):
+        layer_canvas.unbind_all("<MouseWheel>")
+        layer_canvas.unbind_all("<Button-4>")
+        layer_canvas.unbind_all("<Button-5>")
+
+    layer_canvas.bind("<Enter>", _bind_layer_mousewheel)
+    layer_canvas.bind("<Leave>", _unbind_layer_mousewheel)
 
     layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
     layer_btn_frame.pack(pady=(5, 0))
@@ -1259,6 +1297,57 @@ def main():
         select_layer(min(_active_layer_idx, len(layers) - 1))
         mark_dirty()
 
+    def do_import_nodebox():
+        win = tk.Toplevel(root)
+        win.title("Import Nodebox")
+        iw, ih = 900, 780
+        sx = root.winfo_x() + (root.winfo_width() - iw) // 2
+        sy = root.winfo_y() + (root.winfo_height() - ih) // 2
+        win.geometry(f"{iw}x{ih}+{sx}+{sy}")
+        win.configure(bg="#2a2a2a")
+        win.transient(root)
+        win.grab_set()
+
+        tk.Label(win, text='Only type = "fixed" node boxes are supported.',
+                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9),
+                 wraplength=iw - 20, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(win, text='Paste a node_box table, a bare fixed array, or a single box.',
+                 bg="#2a2a2a", fg="#888888", font=("TkDefaultFont", 8),
+                 wraplength=iw - 20, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=(2, 8))
+
+        text_frame = tk.Frame(win, bg="#2a2a2a")
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        text_widget = tk.Text(text_frame, bg="#1a1a1a", fg="#dddddd",
+                               insertbackground="#dddddd", wrap=tk.NONE,
+                               font=("Courier", 10))
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        text_widget.focus_set()
+
+        btn_frame = tk.Frame(win, bg="#2a2a2a")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        def run_import():
+            raw = text_widget.get("1.0", tk.END)
+            try:
+                new_layers, skipped = import_fixed_boxes_as_layers(
+                    raw, EGGSHELL_WHITE,
+                    lambda i: f"Imported Nodebox {i}")
+            except ValueError as e:
+                messagebox.showerror("Import failed", str(e), parent=win)
+                return
+            layers.extend(new_layers)
+            select_layer(len(layers) - 1)
+            mark_dirty()
+            win.destroy()
+            if skipped:
+                messagebox.showwarning(
+                    "Some boxes skipped",
+                    f"{len(skipped)} box(es) were outside the representable range and skipped:\n\n" +
+                    "\n".join(skipped))
+
+        tk.Button(btn_frame, text="Import", width=10, command=run_import).pack(side=tk.RIGHT)
+        tk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.RIGHT, padx=(0, 6))
+
     new_layer_btn = tk.Button(layer_btn_frame, text="New", width=5, command=do_new_layer)
     new_layer_btn.pack(side=tk.LEFT, padx=2)
 
@@ -1267,6 +1356,9 @@ def main():
 
     del_layer_btn = tk.Button(layer_btn_frame, text="Del", width=5, command=do_del_layer)
     del_layer_btn.pack(side=tk.LEFT, padx=2)
+
+    import_layer_btn = tk.Button(layer_btn_frame, text="Import", width=6, command=do_import_nodebox)
+    import_layer_btn.pack(side=tk.LEFT, padx=2)
 
     def do_rename_layer():
         from tkinter import simpledialog

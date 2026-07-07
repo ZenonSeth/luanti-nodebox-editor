@@ -1,3 +1,5 @@
+import re
+
 GRID_SIZE = 64
 
 
@@ -377,6 +379,120 @@ def grids_to_lua_layers(layers):
         fixed = f"{{\n        {lines},\n    }}"
     lua = f"node_box = {{\n    type = \"fixed\",\n    fixed = {fixed},\n}}"
     return lua, method, count, all_cuboids
+
+
+def _parse_number(tok):
+    tok = tok.strip()
+    if "/" in tok:
+        num, den = tok.split("/")
+        return float(num) / float(den)
+    return float(tok)
+
+
+def _extract_brace_groups(s):
+    """Return the balanced {...} substrings found at the top level of s."""
+    groups = []
+    depth = 0
+    start = None
+    for i, ch in enumerate(s):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                groups.append(s[start:i + 1])
+                start = None
+    return groups
+
+
+_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?(?:/-?\d+(?:\.\d+)?)?")
+
+
+def parse_fixed_boxes(text):
+    """Parse pasted Lua text into a list of (x1, y1, z1, x2, y2, z2) boxes in node units.
+
+    Accepts a bare box `{x1,y1,z1,x2,y2,z2}`, a bare array of boxes
+    `{{...}, {...}}`, or a full `node_box = {type = "fixed", fixed = {...}}` table.
+    Raises ValueError with a human-readable message if nothing usable is found.
+    """
+    fixed_match = re.search(r"fixed\s*=\s*(\{.*)", text, re.DOTALL)
+    body = fixed_match.group(1) if fixed_match else text
+
+    outer_groups = _extract_brace_groups(body)
+    if not outer_groups:
+        raise ValueError("No box data found (expected Lua table syntax like { ... }).")
+    outer = outer_groups[0]
+
+    inner_groups = _extract_brace_groups(outer[1:-1])
+    box_strs = inner_groups if inner_groups else [outer]
+
+    boxes = []
+    for box_str in box_strs:
+        nums = _NUMBER_RE.findall(box_str)
+        if len(nums) != 6:
+            raise ValueError(f"Expected 6 numbers per box, found {len(nums)} in: {box_str.strip()}")
+        boxes.append(tuple(_parse_number(n) for n in nums))
+    return boxes
+
+
+def fixed_box_to_grid_range(box):
+    """Inverse of cuboid_to_lua_entry: node-unit box -> voxel grid range, clamped to the grid.
+
+    Returns (grid_range, was_clamped) where was_clamped is True if the box extended
+    beyond the representable -1..+1 node-unit range and had to be clipped.
+    """
+    f1, f2, f3, f4, f5, f6 = box
+    lx1, ly1, lz1 = round(f1 * 32), round(f2 * 32), round(f3 * 32)
+    lx2, ly2, lz2 = round(f4 * 32), round(f5 * 32), round(f6 * 32)
+
+    x1, x2 = lx1 + 32, lx2 + 32 - 1
+    y1, y2 = 32 - ly2, 32 - ly1 - 1
+    z1, z2 = lz1 + 32, lz2 + 32 - 1
+
+    cx1, cx2 = max(0, min(GRID_SIZE - 1, x1)), max(0, min(GRID_SIZE - 1, x2))
+    cy1, cy2 = max(0, min(GRID_SIZE - 1, y1)), max(0, min(GRID_SIZE - 1, y2))
+    cz1, cz2 = max(0, min(GRID_SIZE - 1, z1)), max(0, min(GRID_SIZE - 1, z2))
+    if cx1 > cx2 or cy1 > cy2 or cz1 > cz2:
+        raise ValueError(f"Box {box} falls outside the representable range and was skipped.")
+    was_clamped = (cx1, cx2, cy1, cy2, cz1, cz2) != (x1, x2, y1, y2, z1, z2)
+    return (cx1, cy1, cz1, cx2, cy2, cz2), was_clamped
+
+
+def grid_range_to_layer_grids(x1, y1, z1, x2, y2, z2, color):
+    """Build top/front/side grids that reproduce a single axis-aligned voxel box, filled with color."""
+    flip = NODE_START + NODE_END - 1
+    top = {(x, flip - z): color for x in range(x1, x2 + 1) for z in range(z1, z2 + 1)}
+    front = {(x, y): color for x in range(x1, x2 + 1) for y in range(y1, y2 + 1)}
+    side = {(z, y): color for z in range(z1, z2 + 1) for y in range(y1, y2 + 1)}
+    return top, front, side
+
+
+def import_fixed_boxes_as_layers(text, color, name_fn):
+    """Parse pasted `fixed` node_box Lua into a list of layer dicts, one per box.
+
+    name_fn(index) -> layer name, where index starts at 1.
+    Raises ValueError if the text can't be parsed, or if every box is out of range.
+    """
+    boxes = parse_fixed_boxes(text)
+    layers = []
+    skipped = []
+    for i, box in enumerate(boxes, start=1):
+        try:
+            grid_range, was_clamped = fixed_box_to_grid_range(box)
+        except ValueError as e:
+            skipped.append(str(e))
+            continue
+        if was_clamped:
+            skipped.append(f"Box {box} extended beyond the representable range and was clipped to fit.")
+        top, front, side = grid_range_to_layer_grids(*grid_range, color)
+        layers.append({"name": name_fn(len(layers) + 1), "visible": True,
+                        "top": top, "front": front, "side": side,
+                        "bottom": {}, "back": {}, "right": {}})
+    if not layers:
+        raise ValueError("\n".join(skipped) if skipped else "No boxes found.")
+    return layers, skipped
 
 
 def cuboids_to_selection_box_lua(cuboids):
