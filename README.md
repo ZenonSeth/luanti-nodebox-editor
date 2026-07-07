@@ -4,7 +4,7 @@ A visual editor for creating [Luanti](https://www.luanti.org/) node box definiti
 
 The intersection of the three projections, like shadows on the walls, (a visual hull) defines a 3D voxel shape which is created from them and then is automatically decomposed into minimal nodeboxes for Lua output. Painted colors can be exported as PNG textures for each face as well.
 
-![Nodebox Editor screenshot](https://github.com/user-attachments/assets/80aeb3eb-8e47-4c45-9e92-fb464333baef)
+![Nodebox Editor screenshot](https://github.com/user-attachments/assets/e046f645-60d8-4a27-9ae1-f2b54f1ecb27)
 _Note that in screenshot above the arms of the cactus are in the 2nd layer, which is why they're not visible in texture painter_
 
 ## How it works
@@ -15,7 +15,7 @@ Each grid is 64x64 pixels. The center 32x32 region represents the node itself (1
 
 ## Features
 
-- Three-view pixel painting with pencil and flood-fill tools
+- Three-view pixel painting with pencil, rectangle, ellipse, and flood-fill tools
 - Live 3D preview with click-and-drag rotation and per-face shading
 - Greedy meshing algorithm produces a minimal cuboid count for the Lua output
 - Layer system for shapes that cannot be unambiguously defined by a single set
@@ -27,7 +27,7 @@ Each grid is 64x64 pixels. The center 32x32 region represents the node itself (1
 
 ## Info
 
-![Help dialog screenshot](https://github.com/user-attachments/assets/b926d4f1-f83e-4f1f-9868-c69937a68683)
+![Help dialog screenshot](https://github.com/user-attachments/assets/0a626c70-bb90-4de0-8f32-f0e46b9ba215)
 
 ## Controls
 
@@ -38,10 +38,15 @@ Each grid is 64x64 pixels. The center 32x32 region represents the node itself (1
 | Alt + Left click | Pick color from grid |
 | Y | Pencil tool |
 | F | Fill tool |
+| R | Rectangle tool |
+| E | Ellipse tool |
 | Ctrl+Z | Undo |
 | Ctrl+Y | Redo |
 | Ctrl+S | Save |
 | Drag on 3D preview | Rotate view |
+
+The Fill tool has two options: Tolerance (how close colors need to match to be
+filled) and Noise (fills with a randomly jittered color instead of a flat one).
 
 ## Download
 
