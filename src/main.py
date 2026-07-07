@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from nbx_format import save_nbx, load_nbx
-from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse
+from voxels import grids_to_faces, layers_to_faces, grids_to_lua_layers, grids_to_colored_faces, layers_to_colored_faces, layers_to_merged_grids, _has_node_pixels, _effective_reverse, cuboids_to_selection_box_lua, import_fixed_boxes_as_layers
 from preview3d import render_preview
 from texture_png import layers_to_png, NODE_START, NODE_END
 from color_picker import ask_color
@@ -57,6 +57,22 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
 
+_SRGB_TO_LINEAR = [
+    ((i / 255.0) / 12.92) if (i / 255.0) <= 0.04045
+    else (((i / 255.0) + 0.055) / 1.055) ** 2.4
+    for i in range(256)
+]
+
+
+def _color_distance(hex1, hex2):
+    r1, g1, b1 = int(hex1[1:3], 16), int(hex1[3:5], 16), int(hex1[5:7], 16)
+    r2, g2, b2 = int(hex2[1:3], 16), int(hex2[3:5], 16), int(hex2[5:7], 16)
+    dr = _SRGB_TO_LINEAR[r1] - _SRGB_TO_LINEAR[r2]
+    dg = _SRGB_TO_LINEAR[g1] - _SRGB_TO_LINEAR[g2]
+    db = _SRGB_TO_LINEAR[b1] - _SRGB_TO_LINEAR[b2]
+    return (2 * dr*dr + 4 * dg*dg + 3 * db*db) ** 0.5
+
+
 TARGET_RATIO = 16 / 9
 GRID_SIZE = 64
 NODE_START = 16
@@ -74,6 +90,7 @@ BASE_COLORS = [
     (160, 0, 255),
 ]
 GRAY_BASE = (160, 160, 160)
+EGGSHELL_WHITE = "#f0ead6"
 
 
 def lerp(a, b, t):
@@ -114,8 +131,14 @@ def build_palette():
 selected_color = None
 color_indicator = None
 current_tool = "pencil"
+fill_tolerance = 0.0
+fill_noise_enabled = False
+fill_noise_amount = 0.1
 current_symmetry = "None"
-TOOL_CURSORS = {"pencil": "pencil", "fill": "target"}
+TOOL_CURSORS = {"pencil": "pencil", "fill": "target", "rect": "crosshair", "ellipse": "crosshair"}
+shape_draw_outline = True
+shape_draw_fill = False
+_shape_drag_start = None
 
 ZOOM_LEVELS = {
     "1x": (16, 48),
@@ -226,6 +249,7 @@ preview_azimuth = 35
 preview_elevation = 25
 preview_zoom = 1.0
 cached_faces = []
+cached_voxel_faces = {}
 cached_backdrop_grids = None
 show_shadows = False
 show_model = True
@@ -256,15 +280,32 @@ def _visible_layers():
     return [l for l in _layers if l.get("visible", True)]
 
 
+def _group_faces(faces):
+    voxel_faces = {}
+    for face in faces:
+        if len(face) == 5:
+            fx, fy, fz, name, color = face
+        else:
+            fx, fy, fz, name = face
+            color = None
+        key = (fx, fy, fz)
+        if key not in voxel_faces:
+            voxel_faces[key] = []
+        voxel_faces[key].append((name, color))
+    return voxel_faces
+
+
 def rebuild_faces():
-    global cached_faces, cached_backdrop_grids
+    global cached_faces, cached_voxel_faces, cached_backdrop_grids
     vis = _visible_layers()
     if vis:
         cached_faces = layers_to_colored_faces(vis)
+        cached_voxel_faces = _group_faces(cached_faces)
         mt, mf, ms = layers_to_merged_grids(vis)
         cached_backdrop_grids = {"top": mt, "front": mf, "side": ms}
     else:
         cached_faces = []
+        cached_voxel_faces = {}
         cached_backdrop_grids = None
     redraw_preview()
 
@@ -273,7 +314,7 @@ def redraw_preview():
     if preview_canvas is None:
         return
     render_preview(preview_canvas,
-                   cached_faces if show_model else [],
+                   cached_voxel_faces if show_model else {},
                    preview_azimuth, preview_elevation,
                    backdrop_grids=cached_backdrop_grids if show_shadows else None,
                    zoom=preview_zoom)
@@ -296,10 +337,12 @@ def set_color(color):
     save_settings(settings)
 
 
-def _apply_noise(hex_color):
+def _apply_noise(hex_color, amount=None):
+    if amount is None:
+        amount = noise_amount
     r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
     h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
-    l = max(0.0, min(1.0, l + random.uniform(-noise_amount, noise_amount)))
+    l = max(0.0, min(1.0, l + random.uniform(-amount, amount)))
     nr, ng, nb = colorsys.hls_to_rgb(h, l, s)
     return f"#{int(nr * 255):02x}{int(ng * 255):02x}{int(nb * 255):02x}"
 
@@ -322,20 +365,20 @@ def on_pick_color(event):
         set_color(color)
 
 
-def flood_fill(grid, view_name, col, row, erase=False):
+def flood_fill(grid, view_name, col, row, erase=False, tolerance=0.0):
     target_color = grid.get((col, row))
+    inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
     if erase:
         if target_color is None:
             return
     else:
         # Intended fill color is always selected_color (or layer override for inside cells),
         # regardless of whether the click started inside or outside node bounds.
-        inside_click = NODE_START <= col < NODE_END and NODE_START <= row < NODE_END
         if inside_click and _active_layer_idx != 0 and _layers:
             fill_color = _layers[0][view_name].get((col, row), selected_color)
         else:
             fill_color = selected_color
-        if target_color == fill_color:
+        if target_color == fill_color and not fill_noise_enabled:
             return
     stack = [(col, row)]
     visited = set()
@@ -345,13 +388,24 @@ def flood_fill(grid, view_name, col, row, erase=False):
             continue
         visited.add((c, r))
         cell_color = grid.get((c, r))
-        if cell_color != target_color:
+        if target_color is None:
+            if cell_color is not None:
+                continue
+        else:
+            if cell_color is None:
+                continue
+            if cell_color != target_color and (tolerance == 0.0 or _color_distance(cell_color, target_color) > tolerance):
+                continue
+        in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+        if in_node != inside_click:
             continue
         if erase:
             grid.pop((c, r), None)
         else:
-            in_bounds = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
-            grid[(c, r)] = fill_color if in_bounds else "#000000"
+            cell_fill = fill_color if in_node else "#000000"
+            if fill_noise_enabled and in_node:
+                cell_fill = _apply_noise(cell_fill, fill_noise_amount)
+            grid[(c, r)] = cell_fill
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nc, nr = c + dc, r + dr
             if 0 <= nc < GRID_SIZE and 0 <= nr < GRID_SIZE:
@@ -370,19 +424,79 @@ def _symmetry_cells(col, row):
     return [(col, row)]
 
 
+def _rect_cells(c1, r1, c2, r2):
+    if c1 > c2: c1, c2 = c2, c1
+    if r1 > r2: r1, r2 = r2, r1
+    cells = set()
+    for c in range(c1, c2 + 1):
+        for r in range(r1, r2 + 1):
+            on_border = (c == c1 or c == c2 or r == r1 or r == r2)
+            if on_border and shape_draw_outline:
+                cells.add((c, r))
+            elif not on_border and shape_draw_fill:
+                cells.add((c, r))
+    return cells
+
+
+def _ellipse_cells(c1, r1, c2, r2):
+    if c1 > c2: c1, c2 = c2, c1
+    if r1 > r2: r1, r2 = r2, r1
+    cx = (c1 + c2 + 1) / 2.0
+    cy = (r1 + r2 + 1) / 2.0
+    a = (c2 - c1 + 1) / 2.0
+    b = (r2 - r1 + 1) / 2.0
+
+    def inside(c, r):
+        dx = (c + 0.5 - cx) / a
+        dy = (r + 0.5 - cy) / b
+        return dx * dx + dy * dy <= 1.0
+
+    cells = set()
+    for c in range(c1, c2 + 1):
+        for r in range(r1, r2 + 1):
+            if inside(c, r):
+                if shape_draw_fill:
+                    cells.add((c, r))
+                elif shape_draw_outline:
+                    for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        if not inside(c + dc, r + dr):
+                            cells.add((c, r))
+                            break
+    return cells
+
+
+def _shape_cells(c1, r1, c2, r2):
+    if current_tool == "rect":
+        return _rect_cells(c1, r1, c2, r2)
+    return _ellipse_cells(c1, r1, c2, r2)
+
+
+def _draw_shape_preview(canvas, c1, r1, c2, r2):
+    offset_x, offset_y, size, cell, view_start, view_end = get_grid_params(canvas)
+    for (c, r) in _shape_cells(c1, r1, c2, r2):
+        if view_start <= c < view_end and view_start <= r < view_end:
+            x1 = offset_x + (c - view_start) * cell
+            y1 = offset_y + (r - view_start) * cell
+            canvas.create_rectangle(x1, y1, x1 + cell, y1 + cell,
+                                    fill=selected_color, outline="", tags="shape_preview")
+
+
 def on_click(event, mode="draw"):
-    global _last_drag_cell
+    global _last_drag_cell, _shape_drag_start
     _last_drag_cell = None
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
+        return
+    if current_tool in ("rect", "ellipse"):
+        _shape_drag_start = (canvas, col, row, mode)
         return
     undo_push()
     view_name = canvas_to_name[canvas]
     grid = grids[view_name]
     if mode == "draw":
         if current_tool == "fill":
-            flood_fill(grid, view_name, col, row)
+            flood_fill(grid, view_name, col, row, tolerance=fill_tolerance)
         else:
             for c, r in _symmetry_cells(col, row):
                 color = _resolve_fill_color(view_name, c, r)
@@ -405,6 +519,15 @@ def on_drag(event, mode="draw"):
     canvas = event.widget
     col, row = pixel_to_cell(canvas, event.x, event.y)
     if col is None:
+        return
+    if current_tool in ("rect", "ellipse"):
+        if _shape_drag_start is None or _shape_drag_start[0] is not canvas:
+            return
+        if (col, row) == _last_drag_cell:
+            return
+        _last_drag_cell = (col, row)
+        draw_grid(canvas)
+        _draw_shape_preview(canvas, _shape_drag_start[1], _shape_drag_start[2], col, row)
         return
     if (col, row) == _last_drag_cell:
         return
@@ -429,6 +552,41 @@ def on_drag(event, mode="draw"):
         mark_dirty()
         draw_grid(canvas)
         update_preview()
+
+
+def on_release(event, mode="draw"):
+    global _shape_drag_start
+    if current_tool not in ("rect", "ellipse") or _shape_drag_start is None:
+        return
+    canvas = event.widget
+    if _shape_drag_start[0] is not canvas:
+        return
+    sc, sr, drag_mode = _shape_drag_start[1], _shape_drag_start[2], _shape_drag_start[3]
+    col, row = pixel_to_cell(canvas, event.x, event.y)
+    if col is None:
+        col, row = _last_drag_cell or (sc, sr)
+    _shape_drag_start = None
+    undo_push()
+    view_name = canvas_to_name[canvas]
+    grid = grids[view_name]
+    inside_click = NODE_START <= sc < NODE_END and NODE_START <= sr < NODE_END
+    cells = _shape_cells(sc, sr, col, row)
+    if drag_mode == "draw":
+        for c, r in cells:
+            in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+            if in_node != inside_click:
+                continue
+            color = _resolve_fill_color(view_name, c, r)
+            grid[(c, r)] = color
+    else:
+        for c, r in cells:
+            in_node = NODE_START <= c < NODE_END and NODE_START <= r < NODE_END
+            if in_node != inside_click:
+                continue
+            grid.pop((c, r), None)
+    mark_dirty()
+    draw_grid(canvas)
+    update_preview()
 
 
 def main():
@@ -482,6 +640,31 @@ def main():
         draw_grid(name_to_canvas[view_name])
         update_preview()
 
+    def flip_pixels(view_name, axis):
+        undo_push()
+        grid = grids[view_name]
+        if axis == "hor":
+            new_grid = {(GRID_SIZE - 1 - c, r): color for (c, r), color in grid.items()}
+        else:
+            new_grid = {(c, GRID_SIZE - 1 - r): color for (c, r), color in grid.items()}
+        key = _grid_key(view_name)
+        layers[_active_layer_idx][key] = new_grid
+        grids[view_name] = new_grid
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
+    def rotate_pixels_cw(view_name):
+        undo_push()
+        grid = grids[view_name]
+        new_grid = {(GRID_SIZE - 1 - r, c): color for (c, r), color in grid.items()}
+        key = _grid_key(view_name)
+        layers[_active_layer_idx][key] = new_grid
+        grids[view_name] = new_grid
+        mark_dirty()
+        draw_grid(name_to_canvas[view_name])
+        update_preview()
+
     def toggle_reverse(view_name):
         view_reverse[view_name] = not view_reverse[view_name]
         grids[view_name] = layers[_active_layer_idx][_grid_key(view_name)]
@@ -526,7 +709,29 @@ def main():
                                    font=("TkDefaultFont", 9), relief=tk.FLAT,
                                    padx=4, pady=0,
                                    command=lambda: do_import_png(view_name))
-        import_png_btn.place(x=4, y=160, anchor="nw")
+        import_png_btn.place(x=4, y=244, anchor="nw")
+        flip_lbl = tk.Label(frame, text="Flip", bg="#2a2a2a", fg="#bbbbbb",
+                            font=("TkDefaultFont", 9))
+        flip_lbl.place(x=4, y=160, anchor="nw")
+        rot_cw_btn = tk.Button(frame, text="Rotate Clockwise",
+                               bg="#3a3a3a", fg="#bbbbbb",
+                               font=("TkDefaultFont", 9), relief=tk.FLAT,
+                               padx=4, pady=0,
+                               command=lambda vn=view_name: rotate_pixels_cw(vn))
+        rot_cw_btn.place(x=4, y=202, anchor="nw")
+
+        flip_hor_btn = tk.Button(frame, text="Hor",
+                                 bg="#3a3a3a", fg="#bbbbbb",
+                                 font=("TkDefaultFont", 9), relief=tk.FLAT,
+                                 padx=4, pady=0,
+                                 command=lambda vn=view_name: flip_pixels(vn, "hor"))
+        flip_hor_btn.place(x=34, y=160, anchor="nw")
+        flip_ver_btn = tk.Button(frame, text="Ver",
+                                 bg="#3a3a3a", fg="#bbbbbb",
+                                 font=("TkDefaultFont", 9), relief=tk.FLAT,
+                                 padx=4, pady=0,
+                                 command=lambda vn=view_name: flip_pixels(vn, "ver"))
+        flip_ver_btn.place(x=72, y=160, anchor="nw")
         canvas = tk.Canvas(frame, bg="#2a2a2a", highlightthickness=0)
         canvas.place(relx=0.55, rely=0.5, anchor="center")
         name_to_canvas[view_name] = canvas
@@ -733,6 +938,88 @@ def main():
     noise_check.pack(side=tk.LEFT)
     add_tooltip(noise_check, "Apply random lightness jitter per pixel while drawing")
 
+    fill_frame = tk.Frame(tool_section, bg="#333333")
+    fill_frame.pack()
+
+    tk.Label(fill_frame, text="Tolerance:", bg="#333333", fg="#cccccc").pack(side=tk.LEFT, padx=(0, 4))
+
+    fill_tolerance_var = tk.IntVar(value=0)
+    fill_tolerance_slider = tk.Scale(fill_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                     variable=fill_tolerance_var, length=100, showvalue=True,
+                                     bg="#333333", fg="#cccccc", highlightthickness=0,
+                                     troughcolor="#555555", activebackground="#aaaaaa")
+
+    def on_fill_tolerance_slider(*_):
+        global fill_tolerance
+        fill_tolerance = fill_tolerance_var.get() / 100.0 * 3.0
+
+    fill_tolerance_slider.configure(command=on_fill_tolerance_slider)
+    fill_tolerance_slider.pack(side=tk.LEFT, padx=(2, 0))
+
+    tk.Label(fill_frame, text="|", bg="#333333", fg="#555555").pack(side=tk.LEFT, padx=6)
+
+    fill_noise_var = tk.BooleanVar(value=False)
+    fill_noise_slider_var = tk.IntVar(value=10)
+    fill_noise_slider = tk.Scale(fill_frame, from_=1, to=30, orient=tk.HORIZONTAL,
+                                 variable=fill_noise_slider_var, length=70, showvalue=False,
+                                 bg="#333333", fg="#cccccc", highlightthickness=0,
+                                 troughcolor="#555555", activebackground="#aaaaaa")
+
+    def on_fill_noise_slider(*_):
+        global fill_noise_amount
+        fill_noise_amount = fill_noise_slider_var.get() / 100.0
+
+    fill_noise_slider.configure(command=on_fill_noise_slider)
+
+    def on_fill_noise_toggle(*_):
+        global fill_noise_enabled
+        fill_noise_enabled = fill_noise_var.get()
+        if fill_noise_enabled:
+            fill_noise_slider.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            fill_noise_slider.pack_forget()
+
+    fill_noise_check = tk.Checkbutton(fill_frame, text="Noise", variable=fill_noise_var,
+                                      bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                      activebackground="#333333", activeforeground="#cccccc",
+                                      command=on_fill_noise_toggle)
+    fill_noise_check.pack(side=tk.LEFT)
+    add_tooltip(fill_noise_check, "Apply random lightness jitter per pixel while filling")
+
+    fill_frame.pack_forget()
+
+    shape_frame = tk.Frame(tool_section, bg="#333333")
+    shape_frame.pack()
+
+    shape_outline_var = tk.BooleanVar(value=True)
+    shape_fill_var = tk.BooleanVar(value=False)
+
+    def on_shape_outline_toggle(*_):
+        global shape_draw_outline
+        shape_draw_outline = shape_outline_var.get()
+        if not shape_draw_outline and not shape_draw_fill:
+            shape_fill_var.set(True)
+            on_shape_fill_toggle()
+
+    def on_shape_fill_toggle(*_):
+        global shape_draw_fill
+        shape_draw_fill = shape_fill_var.get()
+        if not shape_draw_outline and not shape_draw_fill:
+            shape_outline_var.set(True)
+            on_shape_outline_toggle()
+
+    shape_outline_check = tk.Checkbutton(shape_frame, text="Outline", variable=shape_outline_var,
+                                         bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                         activebackground="#333333", activeforeground="#cccccc",
+                                         command=on_shape_outline_toggle)
+    shape_outline_check.pack(side=tk.LEFT)
+    shape_fill_check = tk.Checkbutton(shape_frame, text="Fill", variable=shape_fill_var,
+                                      bg="#333333", fg="#cccccc", selectcolor="#333333",
+                                      activebackground="#333333", activeforeground="#cccccc",
+                                      command=on_shape_fill_toggle)
+    shape_fill_check.pack(side=tk.LEFT)
+    shape_frame.pack_forget()
+
     def set_tool(tool):
         global current_tool
         current_tool = tool
@@ -743,12 +1030,21 @@ def main():
             view.configure(cursor=cursor)
         if tool == "pencil":
             symmetry_frame.pack()
+            fill_frame.pack_forget()
+            shape_frame.pack_forget()
+        elif tool == "fill":
+            symmetry_frame.pack_forget()
+            fill_frame.pack()
+            shape_frame.pack_forget()
         else:
             symmetry_frame.pack_forget()
+            fill_frame.pack_forget()
+            shape_frame.pack()
 
-    tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)"}
+    tool_tooltips = {"pencil": "Pencil Tool (Y)", "fill": "Fill Tool (F)",
+                     "rect": "Rectangle Tool (R)", "ellipse": "Ellipse Tool (E)"}
     tool_buttons = {}
-    for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill")):
+    for tool_name, label in (("pencil", "Pencil"), ("fill", "Fill"), ("rect", "Rect"), ("ellipse", "Ellipse")):
         btn = tk.Button(tool_frame, text=label, width=7,
                         command=lambda t=tool_name: set_tool(t))
         btn.pack(side=tk.LEFT, padx=2)
@@ -876,8 +1172,45 @@ def main():
     layer_list_frame.pack(fill=tk.X)
     layer_list_frame.pack_propagate(False)
 
-    layer_inner = tk.Frame(layer_list_frame, bg="#1a1a1a")
-    layer_inner.pack(fill=tk.BOTH, expand=True)
+    layer_scrollbar = tk.Scrollbar(layer_list_frame, orient=tk.VERTICAL)
+    layer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    layer_canvas = tk.Canvas(layer_list_frame, bg="#1a1a1a", highlightthickness=0,
+                              yscrollcommand=layer_scrollbar.set)
+    layer_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    layer_scrollbar.config(command=layer_canvas.yview)
+
+    layer_inner = tk.Frame(layer_canvas, bg="#1a1a1a")
+    layer_inner_id = layer_canvas.create_window((0, 0), window=layer_inner, anchor="nw")
+
+    def _on_layer_inner_configure(event):
+        layer_canvas.configure(scrollregion=layer_canvas.bbox("all"))
+
+    layer_inner.bind("<Configure>", _on_layer_inner_configure)
+
+    def _on_layer_canvas_configure(event):
+        layer_canvas.itemconfig(layer_inner_id, width=event.width)
+
+    layer_canvas.bind("<Configure>", _on_layer_canvas_configure)
+
+    def _on_layer_mousewheel(event):
+        if event.num == 5 or event.delta < 0:
+            layer_canvas.yview_scroll(1, "units")
+        else:
+            layer_canvas.yview_scroll(-1, "units")
+
+    def _bind_layer_mousewheel(event):
+        layer_canvas.bind_all("<MouseWheel>", _on_layer_mousewheel)
+        layer_canvas.bind_all("<Button-4>", _on_layer_mousewheel)
+        layer_canvas.bind_all("<Button-5>", _on_layer_mousewheel)
+
+    def _unbind_layer_mousewheel(event):
+        layer_canvas.unbind_all("<MouseWheel>")
+        layer_canvas.unbind_all("<Button-4>")
+        layer_canvas.unbind_all("<Button-5>")
+
+    layer_canvas.bind("<Enter>", _bind_layer_mousewheel)
+    layer_canvas.bind("<Leave>", _unbind_layer_mousewheel)
 
     layer_btn_frame = tk.Frame(layers_frame, bg="#333333")
     layer_btn_frame.pack(pady=(5, 0))
@@ -964,6 +1297,57 @@ def main():
         select_layer(min(_active_layer_idx, len(layers) - 1))
         mark_dirty()
 
+    def do_import_nodebox():
+        win = tk.Toplevel(root)
+        win.title("Import Nodebox")
+        iw, ih = 900, 780
+        sx = root.winfo_x() + (root.winfo_width() - iw) // 2
+        sy = root.winfo_y() + (root.winfo_height() - ih) // 2
+        win.geometry(f"{iw}x{ih}+{sx}+{sy}")
+        win.configure(bg="#2a2a2a")
+        win.transient(root)
+        win.grab_set()
+
+        tk.Label(win, text='Only type = "fixed" node boxes are supported.',
+                 bg="#2a2a2a", fg="#cccccc", font=("TkDefaultFont", 9),
+                 wraplength=iw - 20, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(win, text='Paste a node_box table, a bare fixed array, or a single box.',
+                 bg="#2a2a2a", fg="#888888", font=("TkDefaultFont", 8),
+                 wraplength=iw - 20, justify=tk.LEFT).pack(fill=tk.X, padx=10, pady=(2, 8))
+
+        text_frame = tk.Frame(win, bg="#2a2a2a")
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        text_widget = tk.Text(text_frame, bg="#1a1a1a", fg="#dddddd",
+                               insertbackground="#dddddd", wrap=tk.NONE,
+                               font=("Courier", 10))
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        text_widget.focus_set()
+
+        btn_frame = tk.Frame(win, bg="#2a2a2a")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        def run_import():
+            raw = text_widget.get("1.0", tk.END)
+            try:
+                new_layers, skipped = import_fixed_boxes_as_layers(
+                    raw, EGGSHELL_WHITE,
+                    lambda i: f"Imported Nodebox {i}")
+            except ValueError as e:
+                messagebox.showerror("Import failed", str(e), parent=win)
+                return
+            layers.extend(new_layers)
+            select_layer(len(layers) - 1)
+            mark_dirty()
+            win.destroy()
+            if skipped:
+                messagebox.showwarning(
+                    "Some boxes skipped",
+                    f"{len(skipped)} box(es) were outside the representable range and skipped:\n\n" +
+                    "\n".join(skipped))
+
+        tk.Button(btn_frame, text="Import", width=10, command=run_import).pack(side=tk.RIGHT)
+        tk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.RIGHT, padx=(0, 6))
+
     new_layer_btn = tk.Button(layer_btn_frame, text="New", width=5, command=do_new_layer)
     new_layer_btn.pack(side=tk.LEFT, padx=2)
 
@@ -972,6 +1356,9 @@ def main():
 
     del_layer_btn = tk.Button(layer_btn_frame, text="Del", width=5, command=do_del_layer)
     del_layer_btn.pack(side=tk.LEFT, padx=2)
+
+    import_layer_btn = tk.Button(layer_btn_frame, text="Import", width=6, command=do_import_nodebox)
+    import_layer_btn.pack(side=tk.LEFT, padx=2)
 
     def do_rename_layer():
         from tkinter import simpledialog
@@ -1129,7 +1516,7 @@ def main():
                                 outline="#555555", width=1)
 
     def do_export():
-        lua_code, method, count = grids_to_lua_layers(_visible_layers())
+        lua_code, method, count, all_cuboids = grids_to_lua_layers(_visible_layers())
         win = tk.Toplevel(root)
         win.title("Export")
         ew, eh = 540, 960
@@ -1215,33 +1602,70 @@ def main():
         has_bottom = bool(_composite_view("bottom")) and _composite_view("bottom") != _composite_view("top")
         has_back = bool(_composite_view("back")) and _composite_view("back") != _composite_view("front")
         has_right = bool(_composite_view("right")) and _composite_view("right") != _composite_view("side")
-        top_name = "NODENAME_top.png"
-        bottom_name = "NODENAME_bottom.png" if has_bottom else top_name
-        left_name = "NODENAME_left.png"
-        right_name = "NODENAME_right.png" if has_right else left_name
-        front_name = "NODENAME_front.png"
-        back_name = "NODENAME_back.png" if has_back else front_name
-        TILES_DEF = (
-            'tiles = {\n'
-            f'    "{top_name}",\n'
-            f'    "{bottom_name}",\n'
-            f'    "{left_name}",\n'
-            f'    "{right_name}",\n'
-            f'    "{back_name}",\n'
-            f'    "{front_name}",\n'
-            '},\n'
-        )
 
-        include_tiles = tk.BooleanVar(value=False)
+        include_tiles = tk.BooleanVar(value=True)
+        include_selection_box = tk.BooleanVar(value=False)
+        selection_box_lua = cuboids_to_selection_box_lua(all_cuboids)
+        node_name_var = tk.StringVar(value="NODENAME")
 
-        def refresh_code():
+        def _build_tiles_def():
+            prefix = node_name_var.get() or "NODENAME"
+            top_name = f"{prefix}_top.png"
+            left_name = f"{prefix}_left.png"
+            front_name = f"{prefix}_front.png"
+            bottom_name = f"{prefix}_bottom.png" if has_bottom else top_name
+            right_name = f"{prefix}_right.png" if has_right else left_name
+            back_name = f"{prefix}_back.png" if has_back else front_name
+            return (
+                'tiles = {\n'
+                f'    "{top_name}",\n'
+                f'    "{bottom_name}",\n'
+                f'    "{left_name}",\n'
+                f'    "{right_name}",\n'
+                f'    "{back_name}",\n'
+                f'    "{front_name}",\n'
+                '},\n'
+            )
+
+        def refresh_code(*_):
             code = lua_code
+            if include_selection_box.get() and selection_box_lua:
+                code = selection_box_lua + "\n" + code
             if include_tiles.get():
-                code = TILES_DEF + code
+                code = _build_tiles_def() + code
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
             text.insert("1.0", code)
             text.configure(state=tk.DISABLED)
+
+        node_name_var.trace_add("write", refresh_code)
+
+        def export_all_pngs():
+            prefix = node_name_var.get() or "NODENAME"
+            folder = filedialog.askdirectory(title="Export all PNGs to folder", parent=win)
+            if not folder:
+                return
+            import os
+            views_to_export = [("top", "top"), ("front", "front"), ("side", "left")]
+            if has_bottom:
+                views_to_export.append(("bottom", "bottom"))
+            if has_back:
+                views_to_export.append(("back", "back"))
+            if has_right:
+                views_to_export.append(("right", "right"))
+            for view_name, suffix in views_to_export:
+                path = os.path.join(folder, f"{prefix}_{suffix}.png")
+                layers_to_png(_visible_layers(), view_name, path)
+            export_all_btn.configure(text="Exported!")
+            win.after(1500, lambda: export_all_btn.configure(text="Export All PNGs"))
+
+        name_row = tk.Frame(win, bg="#2a2a2a")
+        name_row.pack(fill=tk.X, padx=14, pady=(8, 0))
+        tk.Label(name_row, text="Node name:", bg="#2a2a2a", fg="#cccccc").pack(side=tk.LEFT)
+        tk.Entry(name_row, textvariable=node_name_var, bg="#1a1a1a", fg="#cccccc",
+                 insertbackground="#cccccc", width=24).pack(side=tk.LEFT, padx=(6, 0))
+        export_all_btn = tk.Button(name_row, text="Export All PNGs", command=export_all_pngs)
+        export_all_btn.pack(side=tk.LEFT, padx=(10, 0))
 
         tiles_cb = tk.Checkbutton(win, text="Include tiles definition",
                                   variable=include_tiles, bg="#2a2a2a",
@@ -1249,7 +1673,16 @@ def main():
                                   activebackground="#2a2a2a",
                                   activeforeground="#cccccc",
                                   command=refresh_code)
-        tiles_cb.pack(anchor="w", padx=14, pady=(5, 0))
+        tiles_cb.pack(anchor="w", padx=14, pady=(4, 0))
+
+        sel_box_cb = tk.Checkbutton(win, text="Include bounding selection_box",
+                                    variable=include_selection_box, bg="#2a2a2a",
+                                    fg="#cccccc", selectcolor="#1a1a1a",
+                                    activebackground="#2a2a2a",
+                                    activeforeground="#cccccc",
+                                    command=refresh_code,
+                                    state=tk.NORMAL if selection_box_lua else tk.DISABLED)
+        sel_box_cb.pack(anchor="w", padx=14, pady=(2, 0))
 
         text_frame = tk.Frame(win, bg="#2a2a2a")
         text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 5))
@@ -1260,8 +1693,7 @@ def main():
                        yscrollcommand=text_scroll.set)
         text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         text_scroll.config(command=text.yview)
-        text.insert("1.0", lua_code)
-        text.configure(state=tk.DISABLED)
+        refresh_code()
 
         def get_displayed_code():
             return text.get("1.0", tk.END).rstrip("\n")
@@ -1307,7 +1739,7 @@ def main():
     controls_text = (
         "LMB / drag: Draw   RMB / drag: Erase\n"
         "Alt+LMB: Pick color   Ctrl+Z/Y: Undo/Redo\n"
-        "Y: Pencil tool   F: Fill tool   S: Cycle symmetry"
+        "Y: Pencil   F: Fill   R: Rect   E: Ellipse   S: Cycle symmetry"
     )
     controls_label = tk.Label(left_panel, text=controls_text, bg="#333333",
                               fg="#cccccc", font=("TkDefaultFont", 11),
@@ -1363,8 +1795,10 @@ def main():
         view.bind("<Configure>", on_canvas_resize)
         view.bind("<Button-1>", lambda e: on_click(e, "draw"))
         view.bind("<B1-Motion>", lambda e: on_drag(e, "draw"))
+        view.bind("<ButtonRelease-1>", lambda e: on_release(e, "draw"))
         view.bind("<Button-3>", lambda e: on_click(e, "erase"))
         view.bind("<B3-Motion>", lambda e: on_drag(e, "erase"))
+        view.bind("<ButtonRelease-3>", lambda e: on_release(e, "erase"))
         view.bind("<Alt-Button-1>", on_pick_color)
         view.bind("<Alt-B1-Motion>", on_pick_color)
         view.bind("<Motion>", on_hover)
@@ -1391,6 +1825,8 @@ def main():
     root.bind("<Control-o>", lambda e: do_load())
     root.bind("y", lambda e: set_tool("pencil"))
     root.bind("f", lambda e: set_tool("fill"))
+    root.bind("r", lambda e: set_tool("rect"))
+    root.bind("e", lambda e: set_tool("ellipse"))
 
     SYMMETRY_CYCLE = ["None", "Left/Right", "Top/Bottom", "Radial"]
 

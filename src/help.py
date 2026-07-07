@@ -17,7 +17,7 @@ def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options
              font=("TkDefaultFont", 13, "bold")).pack(pady=(18, 3))
     tk.Label(win, text="Visual Hull Reconstruction Nodebox & Texture Editor",
              bg="#2a2a2a", fg="#888888", font=("TkDefaultFont", 9)).pack()
-    tk.Label(win, text="Version 0.8.0   -   © 2026 Zenon Seth - LGPL 2.1",
+    tk.Label(win, text="Version 0.9.0   -   © 2026 Zenon Seth - LGPL 2.1",
              bg="#2a2a2a", fg="#ccff00", font=("TkDefaultFont", 11)).pack(pady=(4, 14))
 
     def section(title, lines, title_color="#88bbff"):
@@ -69,6 +69,8 @@ def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options
 
     section("Drawing tools", [
         [("Pencil", "kw"), " (Y): single-pixel drawing.   ", ("Fill", "kw"), " (F): flood-fills connected pixels of the same color."],
+        [("Rect", "kw"), " (R): click and drag to draw a rectangle.   ", ("Ellipse", "kw"), " (E): click and drag to draw an ellipse."],
+        ["Rect and Ellipse support ", ("Outline", "kw"), " and/or ", ("Fill", "kw"), " modes via checkboxes. Right-drag to erase."],
         [("Symmetry", "kw"), ": mirrors every stroke - ", ("Left/Right", "mode"), ", ", ("Top/Bottom", "mode"), ", or ", ("Radial", "mode"), " (both axes). Toggle with S."],
         [("Noise", "kw"), ": applies a random lightness jitter per pixel while drawing, for a natural grain effect."],
         "Enable via checkbox next to Symmetry; use the slider to set intensity.",
@@ -76,7 +78,7 @@ def show_help(root, settings, save_settings, on_3d_options=None, show_3d_options
 
     section("Controls", [
         [("LMB", "kw"), " / drag: Draw  |  ", ("RMB", "kw"), " / drag: Erase  |  ", ("Alt+LMB", "kw"), ": Pick color"],
-        [("Ctrl+Z", "kw"), ": Undo  |  ", ("Ctrl+Y", "kw"), ": Redo  |  ", ("Y", "kw"), ": Pencil  |  ", ("F", "kw"), ": Fill  |  ", ("S", "kw"), ": Cycle symmetry"],
+        [("Ctrl+Z", "kw"), ": Undo  |  ", ("Ctrl+Y", "kw"), ": Redo  |  ", ("Y", "kw"), ": Pencil  |  ", ("F", "kw"), ": Fill  |  ", ("R", "kw"), ": Rect  |  ", ("E", "kw"), ": Ellipse  |  ", ("S", "kw"), ": Cycle symmetry"],
     ])
 
     use_system_var = tk.BooleanVar(value=settings.get("use_system_colorpicker", False))

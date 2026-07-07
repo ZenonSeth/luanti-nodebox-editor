@@ -19,9 +19,14 @@
       (useful for symmetrical shapes, with undo support)
 - [x] Symmetry drawing: toggle 2-way or 4-way symmetry around center point,
       plus a mirror checkbox. Applies to pencil tool only, not fill.
-- [ ] Variable pencil tool: draws the selected color with a random offset
+- [x] Variable pencil tool: draws the selected color with a random offset
       (e.g. #ff00cc might draw as #f000c0). Controllable via a slider
       for the amount of variation.
+- [x] Rotate Clockwise button per view (90° CW rotation of pixels)
+- [x] Export dialog: node name field that feeds tiles definition and Export All PNGs filenames
+- [x] Export dialog: "Export All PNGs" button — saves all unique face textures to a folder
+- [x] Export dialog: bounding selection_box checkbox (single box encompassing all nodeboxes)
+- [ ] Zoom in/out on 2D views
 
 ## Future features
 
